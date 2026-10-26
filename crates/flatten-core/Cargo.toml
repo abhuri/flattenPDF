@@ -11,3 +11,6 @@ pdfium-render.workspace = true
 jpeg-encoder.workspace = true
 crossbeam-channel.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+jpeg-decoder = { version = "0.3.2", default-features = false }

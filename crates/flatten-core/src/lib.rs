@@ -133,7 +133,8 @@ struct RenderedPage {
     index: usize,
     width: u32,
     height: u32,
-    bgra: Vec<u8>,
+    /// Pixels in R, G, B, A byte order.
+    rgba: Vec<u8>,
     width_pt: f64,
     height_pt: f64,
 }
@@ -311,9 +312,13 @@ fn render_page(page: &PdfPage, index: usize, dpi: f32) -> Result<RenderedPage, F
     if longest_pt * scale > MAX_PIXEL_DIMENSION {
         scale = MAX_PIXEL_DIMENSION / longest_pt;
     }
+    // A BGRA bitmap with FPDF_REVERSE_BYTE_ORDER holds R, G, B, A in memory.
+    // Set the flag explicitly: pdfium-render enables it by default, and getting
+    // the order wrong swaps red and blue in the output.
     let config = PdfRenderConfig::new()
         .scale_page_by_factor(scale)
         .set_format(PdfBitmapFormat::BGRA)
+        .set_reverse_byte_order(true)
         .set_clear_color(PdfColor::WHITE)
         .render_form_data(true)
         .render_annotations(true);
@@ -324,7 +329,7 @@ fn render_page(page: &PdfPage, index: usize, dpi: f32) -> Result<RenderedPage, F
         index,
         width,
         height,
-        bgra: bitmap.as_raw_bytes(),
+        rgba: bitmap.as_raw_bytes(),
         width_pt: width as f64 * 72.0 / scale as f64,
         height_pt: height as f64 * 72.0 / scale as f64,
     })
@@ -341,13 +346,13 @@ fn encode_page(
         page: page.index + 1,
         message: e.to_string(),
     };
-    let mut jpeg = Vec::with_capacity(page.bgra.len() / 10);
+    let mut jpeg = Vec::with_capacity(page.rgba.len() / 10);
     let encoder = Encoder::new(&mut jpeg, quality);
     if grayscale {
         let luma: Vec<u8> = page
-            .bgra
+            .rgba
             .chunks_exact(4)
-            .map(|px| ((px[2] as u32 * 299 + px[1] as u32 * 587 + px[0] as u32 * 114) / 1000) as u8)
+            .map(|px| ((px[0] as u32 * 299 + px[1] as u32 * 587 + px[2] as u32 * 114) / 1000) as u8)
             .collect();
         encoder
             .encode(
@@ -360,10 +365,10 @@ fn encode_page(
     } else {
         encoder
             .encode(
-                &page.bgra,
+                &page.rgba,
                 page.width as u16,
                 page.height as u16,
-                ColorType::Bgra,
+                ColorType::Rgba,
             )
             .map_err(fail)?;
     }
