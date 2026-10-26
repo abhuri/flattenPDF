@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FlattenPDF",
+  "version": "0.1.0",
+  "identifier": "io.github.abhuri.flattenpdf",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "FlattenPDF",
+        "width": 780,
+        "height": 640,
+        "minWidth": 560,
+        "minHeight": 480,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Flatten PDF pages into images",
+    "longDescription": "Converts every page of a PDF into an image so text cannot be selected, searched or edited, and forms, layers and metadata are removed.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../pdfium/*": "pdfium/"
+    }
+  }
+}

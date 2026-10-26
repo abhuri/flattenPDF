@@ -67,9 +67,63 @@ jobs:
           path: flattenpdf-*.*
           if-no-files-found: error
 
+  app:
+    name: app-${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x64, os: windows-latest, pdfium: win-x64, rust_targets: "", args: "--bundles nsis,msi", out: "target/release/bundle" }
+          - { name: linux-x64, os: ubuntu-22.04, pdfium: linux-x64, rust_targets: "", args: "--bundles deb,rpm,appimage", out: "target/release/bundle" }
+          - { name: macos-universal, os: macos-latest, pdfium: mac-univ, rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin", args: "--target universal-apple-darwin --bundles dmg", out: "target/universal-apple-darwin/release/bundle" }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: app-${{ matrix.name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+
+      - name: Fetch PDFium
+        run: PDFIUM_PLATFORM=${{ matrix.pdfium }} scripts/fetch-pdfium.sh pdfium
+
+      - name: Build installers
+        working-directory: app
+        run: |
+          npm install --no-fund --no-audit
+          npx tauri build ${{ matrix.args }}
+
+      - name: Collect installers
+        run: |
+          mkdir dist
+          find "${{ matrix.out }}" -maxdepth 2 -type f \
+            \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -exec cp {} dist/ \;
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlattenPDF-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, app]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -79,5 +133,7 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: flattenpdf-*
+          files: |
+            flattenpdf-*
+            FlattenPDF*
           generate_release_notes: true

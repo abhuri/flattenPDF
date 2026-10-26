@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/flatten-core", "crates/flatten-cli"]
+members = ["crates/flatten-core", "crates/flatten-cli", "app/src-tauri"]
+# The desktop app needs system WebView libraries; build it explicitly with `-p flattenpdf-app`.
+default-members = ["crates/flatten-core", "crates/flatten-cli"]
 
 [workspace.package]
 version = "0.1.0"

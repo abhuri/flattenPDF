@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlattenPDF</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <img src="icon.png" alt="" width="28" height="28">
+      <h1>FlattenPDF</h1>
+    </div>
+    <button id="lang" class="ghost small" type="button">ไทย</button>
+  </header>
+
+  <main>
+    <section id="drop" class="drop">
+      <p class="drop-title" data-i18n="dropTitle"></p>
+      <p class="drop-hint" data-i18n="dropHint"></p>
+      <p class="drop-more" data-i18n="dropMore"></p>
+      <button id="add" type="button" class="secondary" data-i18n="addFiles"></button>
+    </section>
+
+    <ul id="files" class="files" hidden></ul>
+
+    <section class="settings">
+      <div class="field">
+        <span class="label" data-i18n="resolution"></span>
+        <div class="segmented" id="dpi">
+          <button type="button" data-value="150"><b>150</b> <span data-i18n="dpiSmall"></span></button>
+          <button type="button" data-value="200"><b>200</b> <span data-i18n="dpiBalanced"></span></button>
+          <button type="button" data-value="300"><b>300</b> <span data-i18n="dpiSharp"></span></button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label" for="quality"><span data-i18n="quality"></span> <output id="quality-out"></output></label>
+        <input id="quality" type="range" min="50" max="100" step="1">
+      </div>
+      <div class="field inline">
+        <label class="switch"><input id="gray" type="checkbox"><span data-i18n="grayscale"></span></label>
+      </div>
+      <div class="field">
+        <span class="label" data-i18n="saveTo"></span>
+        <div class="row">
+          <span id="outdir" class="path"></span>
+          <button id="choose-dir" type="button" class="ghost small" data-i18n="change"></button>
+          <button id="reset-dir" type="button" class="ghost small" data-i18n="sameFolder" hidden></button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label" for="suffix" data-i18n="suffix"></label>
+        <input id="suffix" type="text" spellcheck="false">
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span id="summary" class="muted"></span>
+    <div class="actions">
+      <button id="clear" type="button" class="ghost" data-i18n="clear"></button>
+      <button id="start" type="button" class="primary" data-i18n="start"></button>
+      <button id="cancel" type="button" class="danger" data-i18n="cancel" hidden></button>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="main.js"></script>
+</body>
+</html>
