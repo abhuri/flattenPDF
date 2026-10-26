@@ -1,0 +1,16 @@
+[package]
+name = "flatten-cli"
+description = "Command-line interface for FlattenPDF"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "flattenpdf"
+path = "src/main.rs"
+
+[dependencies]
+flatten-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true

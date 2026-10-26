@@ -1,0 +1,4 @@
+/target
+/pdfium/
+*.pdf.part
+*_flattened.pdf

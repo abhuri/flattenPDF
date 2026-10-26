@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, pdfium: win-x64, lib: pdfium.dll, exe: flattenpdf.exe }
+          - { name: linux-x64, os: ubuntu-latest, target: x86_64-unknown-linux-gnu, pdfium: linux-x64, lib: libpdfium.so, exe: flattenpdf }
+          - { name: macos-arm64, os: macos-latest, target: aarch64-apple-darwin, pdfium: mac-arm64, lib: libpdfium.dylib, exe: flattenpdf }
+          - { name: macos-x64, os: macos-latest, target: x86_64-apple-darwin, pdfium: mac-x64, lib: libpdfium.dylib, exe: flattenpdf }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Fetch PDFium
+        run: PDFIUM_PLATFORM=${{ matrix.pdfium }} scripts/fetch-pdfium.sh pdfium
+
+      - name: Test
+        if: matrix.name != 'macos-x64'
+        run: cargo test --release --target ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          dist="flattenpdf-${GITHUB_REF_NAME//\//-}-${{ matrix.name }}"
+          mkdir "$dist"
+          cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "$dist/"
+          cp "pdfium/${{ matrix.lib }}" pdfium/PDFIUM_LICENSE README.md "$dist/"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            7z a "$dist.zip" "$dist" > /dev/null
+          else
+            tar -czf "$dist.tar.gz" "$dist"
+          fi
+
+      - name: Smoke test
+        if: matrix.name != 'macos-x64'
+        run: |
+          dist="flattenpdf-${GITHUB_REF_NAME//\//-}-${{ matrix.name }}"
+          "$dist/${{ matrix.exe }}" --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flattenpdf-${{ matrix.name }}
+          path: flattenpdf-*.*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: flattenpdf-*
+          generate_release_notes: true
