@@ -49,6 +49,8 @@ const STRINGS = {
     cancelled: "Cancelled",
     invalid: "Not a valid PDF",
     tagLocked: "Password",
+    darkMode: "Dark mode",
+    language: "Language: TH / EN",
     showInFolder: "Show in folder",
     passwordPlaceholder: "Password",
     unlock: "Use",
@@ -100,6 +102,8 @@ const STRINGS = {
     cancelled: "ยกเลิกแล้ว",
     invalid: "ไม่ใช่ไฟล์ PDF ที่ถูกต้อง",
     tagLocked: "มีรหัสผ่าน",
+    darkMode: "โหมดมืด",
+    language: "ภาษา: TH / EN",
     showInFolder: "เปิดโฟลเดอร์",
     passwordPlaceholder: "รหัสผ่าน",
     unlock: "ใช้",
@@ -143,8 +147,12 @@ function loadSettings() {
   return settings;
 }
 
+const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+
 const state = {
   lang: store.get("lang", navigator.language.startsWith("th") ? "th" : "en"),
+  /** "light" or "dark" once chosen with the switch; null follows the system. */
+  theme: ["light", "dark"].includes(store.get("theme", null)) ? store.get("theme", null) : null,
   tab: TABS.includes(store.get("tab", "flatten")) ? store.get("tab", "flatten") : "flatten",
   settings: loadSettings(),
   files: { flatten: [], images: [] },
@@ -158,6 +166,23 @@ const t = (key, ...args) => {
   return typeof value === "function" ? value(...args) : value;
 };
 const currentFiles = () => state.files[state.tab];
+const currentTheme = () => state.theme ?? (systemDark.matches ? "dark" : "light");
+
+/** Shows `value` as the active option of a two-option `.toggle` switch. */
+function setToggle(toggle, value, label) {
+  const options = [...toggle.querySelectorAll(".opt")];
+  for (const opt of options) opt.classList.toggle("active", opt.dataset.opt === value);
+  toggle.dataset.on = options[1].dataset.opt === value ? "right" : "left";
+  toggle.setAttribute("aria-checked", String(toggle.dataset.on === "right"));
+  toggle.setAttribute("aria-label", label);
+  toggle.title = label;
+}
+
+function applyTheme() {
+  const theme = currentTheme();
+  document.documentElement.dataset.theme = theme;
+  setToggle($("theme-toggle"), theme, t("darkMode"));
+}
 
 function formatBytes(bytes) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -358,7 +383,8 @@ function render() {
   document.documentElement.lang = state.lang;
   for (const node of document.querySelectorAll("[data-i18n]")) node.textContent = t(node.dataset.i18n);
   for (const node of document.querySelectorAll("[data-i18n-placeholder]")) node.placeholder = t(node.dataset.i18nPlaceholder);
-  $("lang").textContent = state.lang === "th" ? "English" : "ไทย";
+  setToggle($("lang-toggle"), state.lang, t("language"));
+  applyTheme();
   $("drop-hint").textContent = t(HINT[state.tab]);
   $("start").textContent = t(START_LABEL[state.tab]);
 
@@ -420,11 +446,19 @@ function saveSettings() {
 
 // ---------- wiring ----------
 
-$("lang").onclick = () => {
+$("lang-toggle").onclick = () => {
   state.lang = state.lang === "th" ? "en" : "th";
   store.set("lang", state.lang);
   render();
 };
+
+$("theme-toggle").onclick = () => {
+  state.theme = currentTheme() === "dark" ? "light" : "dark";
+  store.set("theme", state.theme);
+  applyTheme();
+};
+// Until the switch is used, follow the system setting as it changes.
+systemDark.addEventListener("change", () => { if (state.theme === null) applyTheme(); });
 
 for (const btn of $("tabs").children) {
   btn.onclick = () => {

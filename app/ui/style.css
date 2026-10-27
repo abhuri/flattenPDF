@@ -14,21 +14,20 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14191f;
-    --surface: #1c232b;
-    --border: #2d3743;
-    --text: #e6ebf0;
-    --muted: #93a1b0;
-    --accent: #5b9bd5;
-    --accent-hover: #74acdf;
-    --accent-soft: #1f2f40;
-    --ok: #5cbf86;
-    --warn: #e0a84a;
-    --danger: #e5675a;
-    color-scheme: dark;
-  }
+/* main.js sets data-theme from the saved choice, or the system setting. */
+:root[data-theme="dark"] {
+  --bg: #14191f;
+  --surface: #1c232b;
+  --border: #2d3743;
+  --text: #e6ebf0;
+  --muted: #93a1b0;
+  --accent: #5b9bd5;
+  --accent-hover: #74acdf;
+  --accent-soft: #1f2f40;
+  --ok: #5cbf86;
+  --warn: #e0a84a;
+  --danger: #e5675a;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -177,6 +176,45 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .switch input { accent-color: var(--accent); width: 16px; height: 16px; }
 
 .muted { color: var(--muted); }
+
+.header-toggles { display: flex; align-items: center; gap: 8px; }
+
+/* Two-option sliding switch: the thumb sits under the active option. */
+.toggle {
+  position: relative;
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+}
+.toggle:not(:disabled):hover { border-color: var(--muted); }
+.toggle .thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: 34px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  transition: transform .2s ease;
+}
+.toggle[data-on="right"] .thumb { transform: translateX(34px); }
+.toggle .opt {
+  position: relative;
+  width: 34px;
+  padding: 2px 0;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted);
+  transition: color .2s, opacity .2s;
+}
+.toggle .opt.active { color: var(--accent); }
+.toggle .opt.emoji { font-size: 14px; opacity: .45; }
+.toggle .opt.emoji.active { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .toggle .thumb { transition: none; } }
 
 .tabs { display: flex; gap: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
 .tabs button { padding: 6px 14px; background: transparent; color: var(--muted); font-weight: 600; white-space: nowrap; }

@@ -29,8 +29,9 @@ Download the installer for your OS from
 Pick a tab, drop PDFs onto the window (or click **Add PDFs…**), adjust the
 settings, then press the action button. Files that need a password ask for it
 inline. Output goes next to the original unless you choose another folder;
-existing files are never overwritten (` (2)`, ` (3)`… is appended). The UI is
-available in English and Thai.
+existing files are never overwritten (` (2)`, ` (3)`… is appended). Switches in
+the header choose light 🌞 or dark 🌛 mode (default: follow the system) and
+the TH / EN language.
 
 > The installers are not code-signed yet. On Windows choose *More info → Run
 > anyway*; on macOS right-click the app and choose *Open* the first time.

@@ -16,7 +16,18 @@
       <button type="button" role="tab" data-tab="flatten"><span aria-hidden="true">🔒</span> <span data-i18n="tabFlatten"></span></button>
       <button type="button" role="tab" data-tab="images"><span aria-hidden="true">🖼️</span> <span data-i18n="tabImages"></span></button>
     </nav>
-    <button id="lang" class="ghost small" type="button">ไทย</button>
+    <div class="header-toggles">
+      <button id="theme-toggle" class="toggle" type="button" role="switch">
+        <span class="thumb" aria-hidden="true"></span>
+        <span class="opt emoji" data-opt="light" aria-hidden="true">🌞</span>
+        <span class="opt emoji" data-opt="dark" aria-hidden="true">🌛</span>
+      </button>
+      <button id="lang-toggle" class="toggle" type="button" role="switch">
+        <span class="thumb" aria-hidden="true"></span>
+        <span class="opt" data-opt="th" aria-hidden="true">TH</span>
+        <span class="opt" data-opt="en" aria-hidden="true">EN</span>
+      </button>
+    </div>
   </header>
 
   <main>
