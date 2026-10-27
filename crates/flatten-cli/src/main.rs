@@ -5,11 +5,11 @@ use std::sync::atomic::AtomicBool;
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use flatten_core::{
-    flatten, load_engine, to_images, unlock, FlattenError, FlattenOptions, ImageOptions, Packaging,
-    Progress, Rotation, Summary, UnlockOptions,
+    flatten, load_pdfium, to_images, FlattenError, FlattenOptions, ImageOptions, Packaging,
+    Progress, Rotation, Summary,
 };
 
-/// Offline PDF tools: flatten pages to images, remove passwords, export pages as PNG.
+/// Offline PDF tools: flatten pages to images, or export pages as PNG.
 #[derive(Parser)]
 #[command(name = "flattenpdf", version)]
 struct Cli {
@@ -26,8 +26,6 @@ enum Command {
     /// Convert every page into an image so text cannot be selected, searched,
     /// edited or extracted, and forms, layers and metadata are removed
     Flatten(FlattenArgs),
-    /// Remove the open password and permission restrictions, keeping content as is
-    Unlock(UnlockArgs),
     /// Export pages as PNG images into a folder or a .zip file
     Images(ImagesArgs),
 }
@@ -70,12 +68,6 @@ struct FlattenArgs {
 }
 
 #[derive(Args)]
-struct UnlockArgs {
-    #[command(flatten)]
-    common: Common,
-}
-
-#[derive(Args)]
 struct ImagesArgs {
     #[command(flatten)]
     common: Common,
@@ -114,7 +106,7 @@ enum RotateArg {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let engine = load_engine(cli.pdfium_dir.as_deref())?;
+    let pdfium = load_pdfium(cli.pdfium_dir.as_deref())?;
     match cli.command {
         Command::Flatten(args) => {
             let opts = FlattenOptions {
@@ -128,17 +120,9 @@ fn main() -> Result<()> {
                 &args.common,
                 "_flattened.pdf",
                 |input, output, cancel, progress| {
-                    flatten(&engine, input, output, &opts, cancel, progress)
+                    flatten(&pdfium, input, output, &opts, cancel, progress)
                 },
             )
-        }
-        Command::Unlock(args) => {
-            let opts = UnlockOptions {
-                password: args.common.password.clone(),
-            };
-            for_each_input(&args.common, "_unlocked.pdf", |input, output, _, _| {
-                unlock(&engine, input, output, &opts)
-            })
         }
         Command::Images(args) => {
             let opts = ImageOptions {
@@ -160,7 +144,7 @@ fn main() -> Result<()> {
             };
             let suffix = if args.zip { "_images.zip" } else { "_images" };
             for_each_input(&args.common, suffix, |input, output, cancel, progress| {
-                to_images(&engine, input, output, &opts, cancel, progress)
+                to_images(&pdfium, input, output, &opts, cancel, progress)
             })
         }
     }

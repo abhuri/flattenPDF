@@ -6,21 +6,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use flatten_core::{
-    flatten, inspect_security, load_engine, to_images, unlock, Engine, FlattenError,
-    FlattenOptions, ImageOptions, Packaging, Progress, Rotation, Security, Summary, UnlockOptions,
+    flatten, load_pdfium, to_images, FlattenError, FlattenOptions, ImageOptions, Packaging, Pdfium,
+    Progress, Rotation, Summary,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 struct AppState {
-    engine: Result<Engine, String>,
+    pdfium: Result<Pdfium, String>,
     cancel: Arc<AtomicBool>,
     busy: AtomicBool,
 }
 
 impl AppState {
-    fn engine(&self) -> Result<&Engine, String> {
-        self.engine.as_ref().map_err(Clone::clone)
+    fn pdfium(&self) -> Result<&Pdfium, String> {
+        self.pdfium.as_ref().map_err(Clone::clone)
     }
 }
 
@@ -32,16 +32,9 @@ struct FileInfo {
     size_bytes: u64,
     /// Unknown until the file can be opened (wrong password or broken file).
     pages: Option<u32>,
-    security: SecurityInfo,
+    /// True when a password is needed to open the file.
+    locked: bool,
     error: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-enum SecurityInfo {
-    None,
-    Restricted,
-    Locked,
 }
 
 #[derive(Deserialize)]
@@ -64,9 +57,6 @@ enum Task {
         dpi: f32,
         quality: u8,
         grayscale: bool,
-        suffix: String,
-    },
-    Unlock {
         suffix: String,
     },
     Images {
@@ -127,22 +117,22 @@ enum JobEvent {
     BatchFinished,
 }
 
-/// Reads page count and protection for files added to a list.
+/// Reads page count and whether a password is needed for files added to a list.
 #[tauri::command]
 async fn inspect(app: AppHandle, paths: Vec<String>) -> Result<Vec<FileInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let engine = state.engine()?;
+        let pdfium = state.pdfium()?;
         Ok(paths
             .into_iter()
-            .map(|path| inspect_one(engine, path))
+            .map(|path| inspect_one(pdfium, path))
             .collect())
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-fn inspect_one(engine: &Engine, path: String) -> FileInfo {
+fn inspect_one(pdfium: &Pdfium, path: String) -> FileInfo {
     let p = PathBuf::from(&path);
     let mut info = FileInfo {
         name: p
@@ -153,21 +143,15 @@ fn inspect_one(engine: &Engine, path: String) -> FileInfo {
         size_bytes: std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0),
         path,
         pages: None,
-        security: SecurityInfo::None,
+        locked: false,
         error: None,
     };
-    match inspect_security(engine, &p) {
-        Ok(Security::PasswordRequired) => info.security = SecurityInfo::Locked,
-        Ok(security) => {
-            if security == Security::OwnerRestricted {
-                info.security = SecurityInfo::Restricted;
-            }
-            match engine.pdfium().load_pdf_from_file(&p, None) {
-                Ok(doc) => info.pages = Some(doc.pages().len() as u32),
-                Err(err) => info.error = Some(FlattenError::from(err).to_string()),
-            }
-        }
-        Err(err) => info.error = Some(err.to_string()),
+    match pdfium.load_pdf_from_file(&p, None) {
+        Ok(doc) => info.pages = Some(doc.pages().len() as u32),
+        Err(err) => match FlattenError::from(err) {
+            FlattenError::PasswordRequired => info.locked = true,
+            other => info.error = Some(other.to_string()),
+        },
     }
     info
 }
@@ -182,7 +166,7 @@ fn start(
     task: Task,
     output_dir: Option<String>,
 ) -> Result<(), String> {
-    state.engine()?;
+    state.pdfium()?;
     if state.busy.swap(true, Ordering::SeqCst) {
         return Err("already running".into());
     }
@@ -190,7 +174,7 @@ fn start(
 
     std::thread::spawn(move || {
         let state = app.state::<AppState>();
-        let engine = state.engine().expect("checked above");
+        let pdfium = state.pdfium().expect("checked above");
         let emit = |event: JobEvent| {
             let _ = app.emit("job-event", event);
         };
@@ -200,7 +184,7 @@ fn start(
                 continue;
             }
             run_job(
-                engine,
+                pdfium,
                 &job,
                 &task,
                 output_dir.as_deref(),
@@ -215,7 +199,7 @@ fn start(
 }
 
 fn run_job(
-    engine: &Engine,
+    pdfium: &Pdfium,
     job: &Job,
     task: &Task,
     output_dir: Option<&str>,
@@ -249,13 +233,7 @@ fn run_job(
                 password,
                 threads: 0,
             };
-            flatten(engine, &input, &output, &opts, cancel, &on_progress)
-        }
-        Task::Unlock { suffix } => {
-            let output = output_path(&input, output_dir, suffix, ".pdf");
-            // Unlocking is a single quick save; report it as indeterminate.
-            emit(JobEvent::Started { id, total_pages: 0 });
-            unlock(engine, &input, &output, &UnlockOptions { password })
+            flatten(pdfium, &input, &output, &opts, cancel, &on_progress)
         }
         Task::Images {
             dpi,
@@ -281,7 +259,7 @@ fn run_job(
                 password,
                 threads: 0,
             };
-            to_images(engine, &input, &output, &opts, cancel, &on_progress)
+            to_images(pdfium, &input, &output, &opts, cancel, &on_progress)
         }
     };
 
@@ -331,9 +309,9 @@ fn main() {
         .setup(|app| {
             // Bundled builds ship PDFium under <resources>/pdfium.
             let resource_dir = app.path().resource_dir().ok().map(|dir| dir.join("pdfium"));
-            let engine = load_engine(resource_dir.as_deref()).map_err(|e| e.to_string());
+            let pdfium = load_pdfium(resource_dir.as_deref()).map_err(|e| e.to_string());
             app.manage(AppState {
-                engine,
+                pdfium,
                 cancel: Arc::new(AtomicBool::new(false)),
                 busy: AtomicBool::new(false),
             });

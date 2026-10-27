@@ -5,28 +5,22 @@
 
 #![allow(dead_code)]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use flatten_core::{load_engine, Engine};
+use flatten_core::{load_pdfium, Pdfium};
 
-/// PDFium can only be bound once per process, so all tests share one engine.
-pub fn engine() -> Option<&'static Engine> {
-    static ENGINE: OnceLock<Option<Engine>> = OnceLock::new();
-    ENGINE
+/// PDFium can only be bound once per process, so all tests share one instance.
+pub fn pdfium() -> Option<&'static Pdfium> {
+    static PDFIUM: OnceLock<Option<Pdfium>> = OnceLock::new();
+    PDFIUM
         .get_or_init(|| {
-            let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../pdfium");
-            load_engine(Some(&dir))
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../pdfium");
+            load_pdfium(Some(&dir))
                 .map_err(|e| eprintln!("skipping: {e}"))
                 .ok()
         })
         .as_ref()
-}
-
-pub fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures")
-        .join(name)
 }
 
 /// A fresh, empty temporary directory, removed when the guard drops.
@@ -56,7 +50,7 @@ impl Drop for TempDir {
 /// `page_attrs` sets the page geometry, e.g. `/MediaBox [0 0 100 100]`.
 pub fn red_blue_pdf(page_attrs: &str) -> Vec<u8> {
     let content = "1 0 0 rg 0 0 50 100 re f 0 0 1 rg 50 0 50 100 re f";
-    let objects = [
+    assemble(&[
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
         format!("<< /Type /Page /Parent 2 0 R {page_attrs} /Contents 4 0 R >>"),
@@ -64,7 +58,37 @@ pub fn red_blue_pdf(page_attrs: &str) -> Vec<u8> {
             "<< /Length {} >>\nstream\n{content}\nendstream",
             content.len()
         ),
+    ])
+}
+
+/// A PDF of `count` identical pages with the given geometry (e.g.
+/// `/MediaBox [0 0 300 100]`), each showing its own page number.
+pub fn multi_page_pdf(page_attrs: &str, count: usize) -> Vec<u8> {
+    // obj 1: catalog, obj 2: pages, then a page + content object per page.
+    let kids: Vec<String> = (0..count).map(|i| format!("{} 0 R", 3 + i * 2)).collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {count} >>",
+            kids.join(" ")
+        ),
     ];
+    for i in 0..count {
+        let content = format!("1 0 0 rg 10 10 {} 30 re f", 10 + i * 10);
+        objects.push(format!(
+            "<< /Type /Page /Parent 2 0 R {page_attrs} /Contents {} 0 R >>",
+            4 + i * 2
+        ));
+        objects.push(format!(
+            "<< /Length {} >>\nstream\n{content}\nendstream",
+            content.len()
+        ));
+    }
+    assemble(&objects)
+}
+
+/// Writes `objects` (1-based) into a PDF with an xref table and trailer.
+fn assemble(objects: &[String]) -> Vec<u8> {
     let mut pdf = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
     for (i, body) in objects.iter().enumerate() {

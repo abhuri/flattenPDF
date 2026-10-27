@@ -5,19 +5,19 @@ mod common;
 
 use std::sync::atomic::AtomicBool;
 
-use common::{assert_near, engine, find, pixel, red_blue_pdf, TempDir};
+use common::{assert_near, find, pdfium, pixel, red_blue_pdf, TempDir};
 use flatten_core::{flatten, FlattenOptions};
 
 /// Flattens the red/blue page and returns the bytes of the output PDF.
 fn flatten_test_pdf(name: &str, page_attrs: &str, opts: &FlattenOptions) -> Option<Vec<u8>> {
-    let engine = engine()?;
+    let pdfium = pdfium()?;
     let dir = TempDir::new(name);
     let input = dir.join("in.pdf");
     let output = dir.join("out.pdf");
     std::fs::write(&input, red_blue_pdf(page_attrs)).unwrap();
 
     flatten(
-        engine,
+        pdfium,
         &input,
         &output,
         opts,

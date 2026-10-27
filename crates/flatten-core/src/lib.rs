@@ -1,7 +1,6 @@
 //! FlattenPDF core.
 //!
 //! - [`flatten`]: render every page to an image and write an image-only PDF
-//! - [`unlock`]: remove passwords and permission restrictions, keeping content
 //! - [`to_images`]: export pages as PNG files into a folder or a ZIP archive
 //!
 //! Rendering runs through one bounded pipeline (see `pipeline.rs`), so memory
@@ -11,7 +10,6 @@ mod flatten;
 mod images;
 mod pdf_writer;
 mod pipeline;
-mod unlock;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,7 +21,6 @@ pub use flatten::{flatten, FlattenOptions};
 pub use images::{parse_page_ranges, to_images, ImageOptions, Packaging, Rotation};
 pub use pdf_writer::{ColorSpace, ImagePage, ImagePdfWriter};
 pub use pdfium_render::prelude::Pdfium;
-pub use unlock::{inspect_security, unlock, Security, UnlockOptions};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Progress {
@@ -49,8 +46,6 @@ pub enum FlattenError {
     PasswordRequired,
     #[error("PDFium error: {0:?}")]
     Pdfium(PdfiumError),
-    #[error("PDFium could not {0}")]
-    PdfiumFailed(&'static str),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("encoding failed on page {page}: {message}")]
@@ -72,37 +67,9 @@ impl From<PdfiumError> for FlattenError {
     }
 }
 
-/// A loaded PDFium library.
-///
-/// Besides the high-level [`Pdfium`] API this keeps a second set of raw
-/// bindings for the few calls `pdfium-render` does not expose (saving with
-/// `FPDF_REMOVE_SECURITY`). Both sets go through the same process-wide lock
-/// of the `thread_safe` feature, so they can be used from any thread.
-pub struct Engine {
-    pdfium: Pdfium,
-    raw: RawBindings,
-}
-
-struct RawBindings(Box<dyn PdfiumLibraryBindings>);
-
-// SAFETY: with the `thread_safe` feature every call is serialized through
-// pdfium-render's global PdfiumThreadMarshall mutex.
-unsafe impl Send for RawBindings {}
-unsafe impl Sync for RawBindings {}
-
-impl Engine {
-    pub fn pdfium(&self) -> &Pdfium {
-        &self.pdfium
-    }
-
-    fn raw(&self) -> &dyn PdfiumLibraryBindings {
-        self.raw.0.as_ref()
-    }
-}
-
 /// Binds to the PDFium shared library. Looks next to the executable first,
 /// then in `extra_dir`, then the current directory, then the system paths.
-pub fn load_engine(extra_dir: Option<&Path>) -> Result<Engine, FlattenError> {
+pub fn load_pdfium(extra_dir: Option<&Path>) -> Result<Pdfium, FlattenError> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(dir) = std::env::current_exe()
         .ok()
@@ -115,35 +82,23 @@ pub fn load_engine(extra_dir: Option<&Path>) -> Result<Engine, FlattenError> {
     }
     candidates.push(PathBuf::from("."));
 
-    // Binding twice must happen before `Pdfium::new` publishes the first set.
     let mut errors = Vec::new();
     for dir in &candidates {
         let lib = Pdfium::pdfium_platform_library_name_at_path(dir);
         if !lib.exists() {
             continue;
         }
-        match Pdfium::bind_to_library(&lib).and_then(|a| Ok((a, Pdfium::bind_to_library(&lib)?))) {
-            Ok((bindings, raw)) => return Ok(new_engine(bindings, raw)),
+        match Pdfium::bind_to_library(&lib) {
+            Ok(bindings) => return Ok(Pdfium::new(bindings)),
             Err(err) => errors.push(format!("{}: {err:?}", lib.display())),
         }
     }
-    match Pdfium::bind_to_system_library().and_then(|a| Ok((a, Pdfium::bind_to_system_library()?)))
-    {
-        Ok((bindings, raw)) => Ok(new_engine(bindings, raw)),
+    match Pdfium::bind_to_system_library() {
+        Ok(bindings) => Ok(Pdfium::new(bindings)),
         Err(err) => {
             errors.push(format!("system library: {err:?}"));
             Err(FlattenError::PdfiumNotFound(errors.join("; ")))
         }
-    }
-}
-
-fn new_engine(
-    bindings: Box<dyn PdfiumLibraryBindings>,
-    raw: Box<dyn PdfiumLibraryBindings>,
-) -> Engine {
-    Engine {
-        pdfium: Pdfium::new(bindings),
-        raw: RawBindings(raw),
     }
 }
 

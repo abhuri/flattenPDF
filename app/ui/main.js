@@ -9,11 +9,9 @@ const { getCurrentWebview } = window.__TAURI__.webview;
 const STRINGS = {
   en: {
     tabFlatten: "Flatten",
-    tabUnlock: "Unlock",
     tabImages: "To Images",
     dropTitle: "Drop PDF files here",
     hintFlatten: "Every page becomes an image: text can't be selected or edited, forms, layers and metadata are removed.",
-    hintUnlock: "Removes the open password and print/copy/edit restrictions. Text, forms and bookmarks stay as they are.",
     hintImages: "Saves every page as a PNG image, into a folder next to the PDF or a single .zip file.",
     dropMore: "Drop more PDFs here, or",
     addFiles: "Add PDFs…",
@@ -24,7 +22,6 @@ const STRINGS = {
     quality: "JPEG quality",
     grayscale: "Grayscale (smaller files)",
     suffix: "File name suffix",
-    unlockNote: "Restricted files are unlocked without a password. Files that need a password to open ask for it in the list.",
     rotate: "Rotate images",
     rotNone: "None",
     rotLeft: "Left",
@@ -39,7 +36,6 @@ const STRINGS = {
     sameFolder: "Reset",
     clear: "Clear list",
     startFlatten: "Flatten",
-    startUnlock: "Unlock",
     startImages: "Export images",
     cancel: "Cancel",
     pages: (n) => `${n} pages`,
@@ -52,8 +48,6 @@ const STRINGS = {
     locked: "Password needed",
     cancelled: "Cancelled",
     invalid: "Not a valid PDF",
-    unprotected: "Not protected",
-    tagRestricted: "Restricted",
     tagLocked: "Password",
     showInFolder: "Show in folder",
     passwordPlaceholder: "Password",
@@ -66,11 +60,9 @@ const STRINGS = {
   },
   th: {
     tabFlatten: "Flatten",
-    tabUnlock: "ปลดล็อก",
     tabImages: "แปลงเป็นภาพ",
     dropTitle: "ลากไฟล์ PDF มาวางที่นี่",
     hintFlatten: "ทุกหน้าจะถูกแปลงเป็นภาพ: เลือกหรือแก้ไขข้อความไม่ได้ และฟอร์ม เลเยอร์ และ metadata จะถูกลบออก",
-    hintUnlock: "ถอดรหัสผ่านเปิดไฟล์และข้อจำกัดการพิมพ์/คัดลอก/แก้ไข โดยข้อความ ฟอร์ม และ bookmark ยังอยู่ครบ",
     hintImages: "บันทึกทุกหน้าเป็นภาพ PNG ลงในโฟลเดอร์ข้างไฟล์ PDF หรือรวมเป็นไฟล์ .zip ไฟล์เดียว",
     dropMore: "ลากไฟล์ PDF มาเพิ่มได้ หรือ",
     addFiles: "เลือกไฟล์ PDF…",
@@ -81,7 +73,6 @@ const STRINGS = {
     quality: "คุณภาพ JPEG",
     grayscale: "ขาวดำ (ไฟล์เล็กลง)",
     suffix: "ต่อท้ายชื่อไฟล์",
-    unlockNote: "ไฟล์ที่จำกัดสิทธิ์จะถูกปลดล็อกได้ทันทีโดยไม่ต้องใส่รหัส ส่วนไฟล์ที่ต้องใช้รหัสเปิด จะมีช่องให้ใส่รหัสในรายการ",
     rotate: "หมุนภาพ",
     rotNone: "ไม่หมุน",
     rotLeft: "ซ้าย",
@@ -96,7 +87,6 @@ const STRINGS = {
     sameFolder: "ค่าเดิม",
     clear: "ล้างรายการ",
     startFlatten: "แปลงไฟล์",
-    startUnlock: "ปลดล็อก",
     startImages: "แปลงเป็นภาพ",
     cancel: "ยกเลิก",
     pages: (n) => `${n} หน้า`,
@@ -109,8 +99,6 @@ const STRINGS = {
     locked: "ต้องใส่รหัสผ่าน",
     cancelled: "ยกเลิกแล้ว",
     invalid: "ไม่ใช่ไฟล์ PDF ที่ถูกต้อง",
-    unprotected: "ไม่มีการป้องกัน",
-    tagRestricted: "จำกัดสิทธิ์",
     tagLocked: "มีรหัสผ่าน",
     showInFolder: "เปิดโฟลเดอร์",
     passwordPlaceholder: "รหัสผ่าน",
@@ -123,14 +111,13 @@ const STRINGS = {
   },
 };
 
-const TABS = ["flatten", "unlock", "images"];
-const START_LABEL = { flatten: "startFlatten", unlock: "startUnlock", images: "startImages" };
-const HINT = { flatten: "hintFlatten", unlock: "hintUnlock", images: "hintImages" };
+const TABS = ["flatten", "images"];
+const START_LABEL = { flatten: "startFlatten", images: "startImages" };
+const HINT = { flatten: "hintFlatten", images: "hintImages" };
 
 const DEFAULT_SETTINGS = {
   outputDir: null,
   flatten: { dpi: 200, quality: 85, grayscale: false, suffix: "_flattened" },
-  unlock: { suffix: "_unlocked" },
   images: { dpi: 200, rotation: "none", packaging: "folder", pages: "" },
 };
 
@@ -160,7 +147,7 @@ const state = {
   lang: store.get("lang", navigator.language.startsWith("th") ? "th" : "en"),
   tab: TABS.includes(store.get("tab", "flatten")) ? store.get("tab", "flatten") : "flatten",
   settings: loadSettings(),
-  files: { flatten: [], unlock: [], images: [] },
+  files: { flatten: [], images: [] },
   nextId: 1,
   running: false,
 };
@@ -186,10 +173,9 @@ function el(tag, props = {}, ...children) {
 
 // ---------- files ----------
 
-function initialStatus(info, tab) {
+function initialStatus(info) {
   if (info.error) return "invalid";
-  if (info.security === "locked") return "locked";
-  if (tab === "unlock" && info.security === "none") return "unprotected";
+  if (info.locked) return "locked";
   return "ready";
 }
 
@@ -213,7 +199,7 @@ async function addPaths(paths) {
     list.push({
       id: state.nextId++,
       ...info,
-      status: initialStatus(info, tab),
+      status: initialStatus(info),
       password: "",
       done: 0,
       total: info.pages ?? 0,
@@ -314,8 +300,7 @@ function statusText(file) {
 
 function fileRow(file) {
   const meta = el("div", { className: "file-meta" });
-  if (file.security === "restricted") meta.append(el("span", { className: "tag", textContent: t("tagRestricted") }));
-  if (file.security === "locked") meta.append(el("span", { className: "tag", textContent: t("tagLocked") }));
+  if (file.locked) meta.append(el("span", { className: "tag", textContent: t("tagLocked") }));
   if (file.pages != null) meta.append(el("span", { textContent: t("pages", file.pages) }));
   meta.append(el("span", { textContent: formatBytes(file.sizeBytes) }));
   if (file.status === "done") {

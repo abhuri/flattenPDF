@@ -6,9 +6,11 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
+use pdfium_render::prelude::Pdfium;
+
 use crate::pipeline::{self, RenderedPage};
 use crate::{
-    part_path, remove_part, validate_dpi, worker_threads, Engine, FlattenError, Progress, Summary,
+    part_path, remove_part, validate_dpi, worker_threads, FlattenError, Progress, Summary,
 };
 
 /// Clockwise rotation applied to every exported image.
@@ -62,7 +64,7 @@ impl Default for ImageOptions {
 ///
 /// `on_progress` may be called from a worker thread.
 pub fn to_images(
-    engine: &Engine,
+    pdfium: &Pdfium,
     input: &Path,
     output: &Path,
     opts: &ImageOptions,
@@ -78,9 +80,7 @@ pub fn to_images(
     }
     let started = Instant::now();
 
-    let document = engine
-        .pdfium()
-        .load_pdf_from_file(input, opts.password.as_deref())?;
+    let document = pdfium.load_pdf_from_file(input, opts.password.as_deref())?;
     let page_count = document.pages().len() as usize;
     let page_indices = parse_page_ranges(&opts.pages, page_count)?;
     let total_pages = page_indices.len();

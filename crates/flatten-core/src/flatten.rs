@@ -8,9 +8,11 @@ use std::time::Instant;
 
 use crate::pdf_writer::{ColorSpace, ImagePage, ImagePdfWriter};
 use crate::pipeline::{self, RenderedPage};
+use pdfium_render::prelude::Pdfium;
+
 use crate::{
-    ensure_not_input, part_path, remove_part, validate_dpi, worker_threads, Engine, FlattenError,
-    Progress, Summary,
+    ensure_not_input, part_path, remove_part, validate_dpi, worker_threads, FlattenError, Progress,
+    Summary,
 };
 
 #[derive(Debug, Clone)]
@@ -48,7 +50,7 @@ struct EncodedPage {
 ///
 /// `on_progress` may be called from a worker thread.
 pub fn flatten(
-    engine: &Engine,
+    pdfium: &Pdfium,
     input: &Path,
     output: &Path,
     opts: &FlattenOptions,
@@ -64,9 +66,7 @@ pub fn flatten(
     ensure_not_input(input, output)?;
     let started = Instant::now();
 
-    let document = engine
-        .pdfium()
-        .load_pdf_from_file(input, opts.password.as_deref())?;
+    let document = pdfium.load_pdf_from_file(input, opts.password.as_deref())?;
     let total_pages = document.pages().len() as usize;
     on_progress(Progress::Started { total_pages });
 

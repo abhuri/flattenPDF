@@ -6,7 +6,7 @@ use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
-use common::{assert_near, engine, fixture, pixel, red_blue_pdf, TempDir};
+use common::{assert_near, multi_page_pdf, pdfium, pixel, red_blue_pdf, TempDir};
 use flatten_core::{to_images, ImageOptions, Packaging, Rotation};
 
 /// Decodes a PNG into (RGB pixels, width, height).
@@ -21,9 +21,9 @@ fn decode_png(bytes: &[u8]) -> (Vec<u8>, usize, usize) {
 }
 
 fn export(input: &Path, output: &Path, opts: &ImageOptions) -> bool {
-    let Some(engine) = engine() else { return false };
+    let Some(pdfium) = pdfium() else { return false };
     to_images(
-        engine,
+        pdfium,
         input,
         output,
         opts,
@@ -110,6 +110,8 @@ fn rotates_images() {
 #[test]
 fn exports_selected_pages_into_a_zip() {
     let dir = TempDir::new("zip");
+    let input = dir.join("in.pdf");
+    std::fs::write(&input, multi_page_pdf("/MediaBox [0 0 300 100]", 3)).unwrap();
     let output = dir.join("pages.zip");
     let opts = ImageOptions {
         dpi: 72.0,
@@ -117,8 +119,7 @@ fn exports_selected_pages_into_a_zip() {
         pages: "2".into(),
         ..ImageOptions::default()
     };
-    // The owner-restricted fixture opens without a password and has 2 pages.
-    if !export(&fixture("owner-restricted-aes256.pdf"), &output, &opts) {
+    if !export(&input, &output, &opts) {
         return;
     }
 
@@ -134,7 +135,7 @@ fn exports_selected_pages_into_a_zip() {
 
 #[test]
 fn refuses_to_overwrite_existing_output() {
-    let Some(engine) = engine() else { return };
+    let Some(pdfium) = pdfium() else { return };
     let dir = TempDir::new("exists");
     let input = dir.join("in.pdf");
     std::fs::write(&input, red_blue_pdf("/MediaBox [0 0 100 100]")).unwrap();
@@ -142,7 +143,7 @@ fn refuses_to_overwrite_existing_output() {
     std::fs::create_dir(&output).unwrap();
 
     let result = to_images(
-        engine,
+        pdfium,
         &input,
         &output,
         &ImageOptions::default(),
