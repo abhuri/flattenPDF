@@ -5,19 +5,22 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use flatten_core::{flatten, load_pdfium, FlattenError, Options, Pdfium, Progress};
+use flatten_core::{
+    flatten, inspect_security, load_engine, to_images, unlock, Engine, FlattenError,
+    FlattenOptions, ImageOptions, Packaging, Progress, Rotation, Security, Summary, UnlockOptions,
+};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 struct AppState {
-    pdfium: Result<Pdfium, String>,
+    engine: Result<Engine, String>,
     cancel: Arc<AtomicBool>,
     busy: AtomicBool,
 }
 
 impl AppState {
-    fn pdfium(&self) -> Result<&Pdfium, String> {
-        self.pdfium.as_ref().map_err(Clone::clone)
+    fn engine(&self) -> Result<&Engine, String> {
+        self.engine.as_ref().map_err(Clone::clone)
     }
 }
 
@@ -27,9 +30,18 @@ struct FileInfo {
     path: String,
     name: String,
     size_bytes: u64,
+    /// Unknown until the file can be opened (wrong password or broken file).
     pages: Option<u32>,
-    encrypted: bool,
+    security: SecurityInfo,
     error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum SecurityInfo {
+    None,
+    Restricted,
+    Locked,
 }
 
 #[derive(Deserialize)]
@@ -40,15 +52,45 @@ struct Job {
     password: Option<String>,
 }
 
+/// What to do with every job of a batch, with that task's settings.
 #[derive(Deserialize)]
+#[serde(
+    tag = "mode",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum Task {
+    Flatten {
+        dpi: f32,
+        quality: u8,
+        grayscale: bool,
+        suffix: String,
+    },
+    Unlock {
+        suffix: String,
+    },
+    Images {
+        dpi: f32,
+        rotation: RotationArg,
+        packaging: PackagingArg,
+        pages: String,
+    },
+}
+
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Settings {
-    dpi: f32,
-    quality: u8,
-    grayscale: bool,
-    /// None = save next to the input file.
-    output_dir: Option<String>,
-    suffix: String,
+enum RotationArg {
+    None,
+    Right,
+    Left,
+    Half,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum PackagingArg {
+    Folder,
+    Zip,
 }
 
 #[derive(Clone, Serialize)]
@@ -85,22 +127,22 @@ enum JobEvent {
     BatchFinished,
 }
 
-/// Reads page count and encryption state for files added to the list.
+/// Reads page count and protection for files added to a list.
 #[tauri::command]
 async fn inspect(app: AppHandle, paths: Vec<String>) -> Result<Vec<FileInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let pdfium = state.pdfium()?;
+        let engine = state.engine()?;
         Ok(paths
             .into_iter()
-            .map(|path| inspect_one(pdfium, path))
+            .map(|path| inspect_one(engine, path))
             .collect())
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-fn inspect_one(pdfium: &Pdfium, path: String) -> FileInfo {
+fn inspect_one(engine: &Engine, path: String) -> FileInfo {
     let p = PathBuf::from(&path);
     let mut info = FileInfo {
         name: p
@@ -111,29 +153,36 @@ fn inspect_one(pdfium: &Pdfium, path: String) -> FileInfo {
         size_bytes: std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0),
         path,
         pages: None,
-        encrypted: false,
+        security: SecurityInfo::None,
         error: None,
     };
-    match pdfium.load_pdf_from_file(&p, None) {
-        Ok(doc) => info.pages = Some(doc.pages().len() as u32),
-        Err(err) => match FlattenError::from(err) {
-            FlattenError::PasswordRequired => info.encrypted = true,
-            other => info.error = Some(other.to_string()),
-        },
+    match inspect_security(engine, &p) {
+        Ok(Security::PasswordRequired) => info.security = SecurityInfo::Locked,
+        Ok(security) => {
+            if security == Security::OwnerRestricted {
+                info.security = SecurityInfo::Restricted;
+            }
+            match engine.pdfium().load_pdf_from_file(&p, None) {
+                Ok(doc) => info.pages = Some(doc.pages().len() as u32),
+                Err(err) => info.error = Some(FlattenError::from(err).to_string()),
+            }
+        }
+        Err(err) => info.error = Some(err.to_string()),
     }
     info
 }
 
-/// Starts flattening the given jobs one after another on a background thread.
+/// Runs `task` on the given jobs one after another on a background thread.
 /// Progress is reported through `job-event` events.
 #[tauri::command]
 fn start(
     app: AppHandle,
     state: State<AppState>,
     jobs: Vec<Job>,
-    settings: Settings,
+    task: Task,
+    output_dir: Option<String>,
 ) -> Result<(), String> {
-    state.pdfium()?;
+    state.engine()?;
     if state.busy.swap(true, Ordering::SeqCst) {
         return Err("already running".into());
     }
@@ -141,7 +190,7 @@ fn start(
 
     std::thread::spawn(move || {
         let state = app.state::<AppState>();
-        let pdfium = state.pdfium().expect("checked above");
+        let engine = state.engine().expect("checked above");
         let emit = |event: JobEvent| {
             let _ = app.emit("job-event", event);
         };
@@ -150,7 +199,14 @@ fn start(
                 emit(JobEvent::Cancelled { id: job.id });
                 continue;
             }
-            run_job(pdfium, &job, &settings, &state.cancel, &emit);
+            run_job(
+                engine,
+                &job,
+                &task,
+                output_dir.as_deref(),
+                &state.cancel,
+                &emit,
+            );
         }
         state.busy.store(false, Ordering::SeqCst);
         emit(JobEvent::BatchFinished);
@@ -159,21 +215,15 @@ fn start(
 }
 
 fn run_job(
-    pdfium: &Pdfium,
+    engine: &Engine,
     job: &Job,
-    settings: &Settings,
+    task: &Task,
+    output_dir: Option<&str>,
     cancel: &AtomicBool,
     emit: &(dyn Fn(JobEvent) + Sync),
 ) {
     let input = PathBuf::from(&job.input);
-    let output = output_path(&input, settings);
-    let opts = Options {
-        dpi: settings.dpi,
-        jpeg_quality: settings.quality,
-        grayscale: settings.grayscale,
-        password: job.password.clone().filter(|p| !p.is_empty()),
-        threads: 0,
-    };
+    let password = job.password.clone().filter(|p| !p.is_empty());
     let id = job.id;
     let on_progress = |p: Progress| match p {
         Progress::Started { total_pages } => emit(JobEvent::Started { id, total_pages }),
@@ -183,10 +233,62 @@ fn run_job(
             total_pages,
         }),
     };
-    match flatten(pdfium, &input, &output, &opts, cancel, &on_progress) {
+
+    let result: Result<Summary, FlattenError> = match task {
+        Task::Flatten {
+            dpi,
+            quality,
+            grayscale,
+            suffix,
+        } => {
+            let output = output_path(&input, output_dir, suffix, ".pdf");
+            let opts = FlattenOptions {
+                dpi: *dpi,
+                jpeg_quality: *quality,
+                grayscale: *grayscale,
+                password,
+                threads: 0,
+            };
+            flatten(engine, &input, &output, &opts, cancel, &on_progress)
+        }
+        Task::Unlock { suffix } => {
+            let output = output_path(&input, output_dir, suffix, ".pdf");
+            // Unlocking is a single quick save; report it as indeterminate.
+            emit(JobEvent::Started { id, total_pages: 0 });
+            unlock(engine, &input, &output, &UnlockOptions { password })
+        }
+        Task::Images {
+            dpi,
+            rotation,
+            packaging,
+            pages,
+        } => {
+            let (packaging, extension) = match packaging {
+                PackagingArg::Folder => (Packaging::Folder, ""),
+                PackagingArg::Zip => (Packaging::Zip, ".zip"),
+            };
+            let output = output_path(&input, output_dir, "_images", extension);
+            let opts = ImageOptions {
+                dpi: *dpi,
+                rotation: match rotation {
+                    RotationArg::None => Rotation::None,
+                    RotationArg::Right => Rotation::Right,
+                    RotationArg::Left => Rotation::Left,
+                    RotationArg::Half => Rotation::Half,
+                },
+                packaging,
+                pages: pages.clone(),
+                password,
+                threads: 0,
+            };
+            to_images(engine, &input, &output, &opts, cancel, &on_progress)
+        }
+    };
+
+    match result {
         Ok(summary) => emit(JobEvent::Finished {
             id,
-            output: output.to_string_lossy().into_owned(),
+            output: summary.output.to_string_lossy().into_owned(),
             pages: summary.pages,
             bytes: summary.output_bytes,
             seconds: summary.elapsed.as_secs_f64(),
@@ -200,17 +302,18 @@ fn run_job(
     }
 }
 
-/// `<dir>/<stem><suffix>.pdf`, adding " (2)", " (3)"... rather than overwriting.
-fn output_path(input: &Path, settings: &Settings) -> PathBuf {
-    let dir = match &settings.output_dir {
+/// `<dir>/<stem><suffix><extension>`, adding " (2)", " (3)"... rather than
+/// overwriting. `dir` defaults to the input's folder.
+fn output_path(input: &Path, output_dir: Option<&str>, suffix: &str, extension: &str) -> PathBuf {
+    let dir = match output_dir {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir),
         _ => input.parent().map(Path::to_path_buf).unwrap_or_default(),
     };
     let stem = input.file_stem().unwrap_or_default().to_string_lossy();
-    let mut candidate = dir.join(format!("{stem}{}.pdf", settings.suffix));
+    let mut candidate = dir.join(format!("{stem}{suffix}{extension}"));
     let mut n = 2;
     while candidate.exists() {
-        candidate = dir.join(format!("{stem}{} ({n}).pdf", settings.suffix));
+        candidate = dir.join(format!("{stem}{suffix} ({n}){extension}"));
         n += 1;
     }
     candidate
@@ -228,9 +331,9 @@ fn main() {
         .setup(|app| {
             // Bundled builds ship PDFium under <resources>/pdfium.
             let resource_dir = app.path().resource_dir().ok().map(|dir| dir.join("pdfium"));
-            let pdfium = load_pdfium(resource_dir.as_deref()).map_err(|e| e.to_string());
+            let engine = load_engine(resource_dir.as_deref()).map_err(|e| e.to_string());
             app.manage(AppState {
-                pdfium,
+                engine,
                 cancel: Arc::new(AtomicBool::new(false)),
                 busy: AtomicBool::new(false),
             });

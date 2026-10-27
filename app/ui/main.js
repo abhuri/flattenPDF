@@ -8,8 +8,13 @@ const { getCurrentWebview } = window.__TAURI__.webview;
 
 const STRINGS = {
   en: {
+    tabFlatten: "Flatten",
+    tabUnlock: "Unlock",
+    tabImages: "To Images",
     dropTitle: "Drop PDF files here",
-    dropHint: "Every page becomes an image: text can't be selected or edited, forms, layers and metadata are removed.",
+    hintFlatten: "Every page becomes an image: text can't be selected or edited, forms, layers and metadata are removed.",
+    hintUnlock: "Removes the open password and print/copy/edit restrictions. Text, forms and bookmarks stay as they are.",
+    hintImages: "Saves every page as a PNG image, into a folder next to the PDF or a single .zip file.",
     dropMore: "Drop more PDFs here, or",
     addFiles: "Add PDFs…",
     resolution: "Resolution (DPI)",
@@ -18,24 +23,38 @@ const STRINGS = {
     dpiSharp: "sharp",
     quality: "JPEG quality",
     grayscale: "Grayscale (smaller files)",
+    suffix: "File name suffix",
+    unlockNote: "Restricted files are unlocked without a password. Files that need a password to open ask for it in the list.",
+    rotate: "Rotate images",
+    rotNone: "None",
+    rotLeft: "Left",
+    rotRight: "Right",
+    packaging: "Save as",
+    packFolder: "Folder",
+    pageRange: "Pages",
+    pageRangeHint: "All pages, or e.g. 1-3, 7, 10-",
     saveTo: "Save to",
     sameFolderPath: "Same folder as the original",
     change: "Change…",
     sameFolder: "Reset",
-    suffix: "File name suffix",
     clear: "Clear list",
-    start: "Flatten",
+    startFlatten: "Flatten",
+    startUnlock: "Unlock",
+    startImages: "Export images",
     cancel: "Cancel",
     pages: (n) => `${n} pages`,
     summary: (files, pages) => `${files} file${files === 1 ? "" : "s"} · ${pages} pages`,
     ready: "Ready",
     queued: "Waiting",
-    running: (d, t) => `${d} / ${t}`,
+    running: (d, t) => (t ? `${d} / ${t}` : "Working…"),
     done: (s) => `Done · ${s}`,
     failed: "Failed",
     locked: "Password needed",
     cancelled: "Cancelled",
     invalid: "Not a valid PDF",
+    unprotected: "Not protected",
+    tagRestricted: "Restricted",
+    tagLocked: "Password",
     showInFolder: "Show in folder",
     passwordPlaceholder: "Password",
     unlock: "Use",
@@ -43,11 +62,16 @@ const STRINGS = {
     remove: "Remove",
     notPdf: (n) => `Skipped ${n} non-PDF file${n === 1 ? "" : "s"}`,
     allDone: (n) => `Finished ${n} file${n === 1 ? "" : "s"}`,
-    nothingToDo: "Nothing to flatten",
+    nothingToDo: "Nothing to do",
   },
   th: {
+    tabFlatten: "Flatten",
+    tabUnlock: "ปลดล็อก",
+    tabImages: "แปลงเป็นภาพ",
     dropTitle: "ลากไฟล์ PDF มาวางที่นี่",
-    dropHint: "ทุกหน้าจะถูกแปลงเป็นภาพ: เลือกหรือแก้ไขข้อความไม่ได้ และฟอร์ม เลเยอร์ และ metadata จะถูกลบออก",
+    hintFlatten: "ทุกหน้าจะถูกแปลงเป็นภาพ: เลือกหรือแก้ไขข้อความไม่ได้ และฟอร์ม เลเยอร์ และ metadata จะถูกลบออก",
+    hintUnlock: "ถอดรหัสผ่านเปิดไฟล์และข้อจำกัดการพิมพ์/คัดลอก/แก้ไข โดยข้อความ ฟอร์ม และ bookmark ยังอยู่ครบ",
+    hintImages: "บันทึกทุกหน้าเป็นภาพ PNG ลงในโฟลเดอร์ข้างไฟล์ PDF หรือรวมเป็นไฟล์ .zip ไฟล์เดียว",
     dropMore: "ลากไฟล์ PDF มาเพิ่มได้ หรือ",
     addFiles: "เลือกไฟล์ PDF…",
     resolution: "ความละเอียด (DPI)",
@@ -56,36 +80,59 @@ const STRINGS = {
     dpiSharp: "คมชัด",
     quality: "คุณภาพ JPEG",
     grayscale: "ขาวดำ (ไฟล์เล็กลง)",
+    suffix: "ต่อท้ายชื่อไฟล์",
+    unlockNote: "ไฟล์ที่จำกัดสิทธิ์จะถูกปลดล็อกได้ทันทีโดยไม่ต้องใส่รหัส ส่วนไฟล์ที่ต้องใช้รหัสเปิด จะมีช่องให้ใส่รหัสในรายการ",
+    rotate: "หมุนภาพ",
+    rotNone: "ไม่หมุน",
+    rotLeft: "ซ้าย",
+    rotRight: "ขวา",
+    packaging: "บันทึกเป็น",
+    packFolder: "โฟลเดอร์",
+    pageRange: "หน้า",
+    pageRangeHint: "ทุกหน้า หรือระบุ เช่น 1-3, 7, 10-",
     saveTo: "บันทึกที่",
     sameFolderPath: "โฟลเดอร์เดียวกับไฟล์ต้นฉบับ",
     change: "เปลี่ยน…",
     sameFolder: "ค่าเดิม",
-    suffix: "ต่อท้ายชื่อไฟล์",
     clear: "ล้างรายการ",
-    start: "แปลงไฟล์",
+    startFlatten: "แปลงไฟล์",
+    startUnlock: "ปลดล็อก",
+    startImages: "แปลงเป็นภาพ",
     cancel: "ยกเลิก",
     pages: (n) => `${n} หน้า`,
     summary: (files, pages) => `${files} ไฟล์ · ${pages} หน้า`,
     ready: "พร้อม",
     queued: "รอคิว",
-    running: (d, t) => `${d} / ${t}`,
+    running: (d, t) => (t ? `${d} / ${t}` : "กำลังทำงาน…"),
     done: (s) => `เสร็จ · ${s}`,
     failed: "ไม่สำเร็จ",
     locked: "ต้องใส่รหัสผ่าน",
     cancelled: "ยกเลิกแล้ว",
     invalid: "ไม่ใช่ไฟล์ PDF ที่ถูกต้อง",
+    unprotected: "ไม่มีการป้องกัน",
+    tagRestricted: "จำกัดสิทธิ์",
+    tagLocked: "มีรหัสผ่าน",
     showInFolder: "เปิดโฟลเดอร์",
     passwordPlaceholder: "รหัสผ่าน",
     unlock: "ใช้",
     wrongPassword: "รหัสผ่านไม่ถูกต้อง",
     remove: "ลบออก",
     notPdf: (n) => `ข้ามไฟล์ที่ไม่ใช่ PDF ${n} ไฟล์`,
-    allDone: (n) => `แปลงเสร็จ ${n} ไฟล์`,
-    nothingToDo: "ไม่มีไฟล์ให้แปลง",
+    allDone: (n) => `ทำเสร็จ ${n} ไฟล์`,
+    nothingToDo: "ไม่มีไฟล์ให้ทำงาน",
   },
 };
 
-const DEFAULT_SETTINGS = { dpi: 200, quality: 85, grayscale: false, outputDir: null, suffix: "_flattened" };
+const TABS = ["flatten", "unlock", "images"];
+const START_LABEL = { flatten: "startFlatten", unlock: "startUnlock", images: "startImages" };
+const HINT = { flatten: "hintFlatten", unlock: "hintUnlock", images: "hintImages" };
+
+const DEFAULT_SETTINGS = {
+  outputDir: null,
+  flatten: { dpi: 200, quality: 85, grayscale: false, suffix: "_flattened" },
+  unlock: { suffix: "_unlocked" },
+  images: { dpi: 200, rotation: "none", packaging: "folder", pages: "" },
+};
 
 const store = {
   get(key, fallback) {
@@ -101,10 +148,19 @@ const store = {
   },
 };
 
+function loadSettings() {
+  const saved = store.get("settings.v2", {});
+  const settings = structuredClone(DEFAULT_SETTINGS);
+  settings.outputDir = saved.outputDir ?? null;
+  for (const tab of TABS) Object.assign(settings[tab], saved[tab] || {});
+  return settings;
+}
+
 const state = {
   lang: store.get("lang", navigator.language.startsWith("th") ? "th" : "en"),
-  settings: { ...DEFAULT_SETTINGS, ...store.get("settings", {}) },
-  files: [],
+  tab: TABS.includes(store.get("tab", "flatten")) ? store.get("tab", "flatten") : "flatten",
+  settings: loadSettings(),
+  files: { flatten: [], unlock: [], images: [] },
   nextId: 1,
   running: false,
 };
@@ -114,6 +170,7 @@ const t = (key, ...args) => {
   const value = STRINGS[state.lang][key];
   return typeof value === "function" ? value(...args) : value;
 };
+const currentFiles = () => state.files[state.tab];
 
 function formatBytes(bytes) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -129,9 +186,18 @@ function el(tag, props = {}, ...children) {
 
 // ---------- files ----------
 
+function initialStatus(info, tab) {
+  if (info.error) return "invalid";
+  if (info.security === "locked") return "locked";
+  if (tab === "unlock" && info.security === "none") return "unprotected";
+  return "ready";
+}
+
 async function addPaths(paths) {
+  const tab = state.tab;
+  const list = state.files[tab];
   const pdfs = paths.filter((p) => p.toLowerCase().endsWith(".pdf"));
-  const known = new Set(state.files.map((f) => f.path));
+  const known = new Set(list.map((f) => f.path));
   const fresh = pdfs.filter((p) => !known.has(p));
   if (pdfs.length < paths.length) toast(t("notPdf", paths.length - pdfs.length));
   if (!fresh.length) return;
@@ -144,10 +210,10 @@ async function addPaths(paths) {
     return;
   }
   for (const info of infos) {
-    state.files.push({
+    list.push({
       id: state.nextId++,
       ...info,
-      status: info.error ? "invalid" : info.encrypted ? "locked" : "ready",
+      status: initialStatus(info, tab),
       password: "",
       done: 0,
       total: info.pages ?? 0,
@@ -157,11 +223,16 @@ async function addPaths(paths) {
 }
 
 function runnable(file) {
-  return ["ready", "failed", "cancelled"].includes(file.status) && !(file.encrypted && !file.password);
+  return ["ready", "failed", "cancelled"].includes(file.status);
+}
+
+function taskFor(tab) {
+  const s = state.settings[tab];
+  return { mode: tab, ...s };
 }
 
 async function start() {
-  const files = state.files.filter(runnable);
+  const files = currentFiles().filter(runnable);
   if (!files.length) {
     toast(t("nothingToDo"));
     return;
@@ -175,7 +246,8 @@ async function start() {
   try {
     await invoke("start", {
       jobs: files.map((f) => ({ id: f.id, input: f.path, password: f.password || null })),
-      settings: state.settings,
+      task: taskFor(state.tab),
+      outputDir: state.settings.outputDir,
     });
   } catch (err) {
     state.running = false;
@@ -185,16 +257,24 @@ async function start() {
   }
 }
 
+function findFile(id) {
+  for (const tab of TABS) {
+    const file = state.files[tab].find((f) => f.id === id);
+    if (file) return file;
+  }
+  return null;
+}
+
 function onJobEvent(event) {
   if (event.kind === "batchFinished") {
     state.running = false;
-    const finished = state.files.filter((f) => f.status === "done" && f.justFinished);
+    const finished = TABS.flatMap((tab) => state.files[tab]).filter((f) => f.justFinished);
     if (finished.length) toast(t("allDone", finished.length));
-    for (const f of state.files) f.justFinished = false;
+    for (const f of finished) f.justFinished = false;
     render();
     return;
   }
-  const file = state.files.find((f) => f.id === event.id);
+  const file = findFile(event.id);
   if (!file) return;
   switch (event.kind) {
     case "started":
@@ -206,11 +286,11 @@ function onJobEvent(event) {
       file.total = event.totalPages;
       break;
     case "finished":
-      Object.assign(file, { status: "done", output: event.output, outBytes: event.bytes, seconds: event.seconds, justFinished: true });
+      Object.assign(file, { status: "done", output: event.output, outBytes: event.bytes, justFinished: true });
       break;
     case "failed":
       if (event.passwordRequired) {
-        Object.assign(file, { status: "locked", encrypted: true, password: "", passwordError: true });
+        Object.assign(file, { status: "locked", password: "", passwordError: true });
       } else {
         Object.assign(file, { status: "failed", message: event.message });
       }
@@ -234,6 +314,8 @@ function statusText(file) {
 
 function fileRow(file) {
   const meta = el("div", { className: "file-meta" });
+  if (file.security === "restricted") meta.append(el("span", { className: "tag", textContent: t("tagRestricted") }));
+  if (file.security === "locked") meta.append(el("span", { className: "tag", textContent: t("tagLocked") }));
   if (file.pages != null) meta.append(el("span", { textContent: t("pages", file.pages) }));
   meta.append(el("span", { textContent: formatBytes(file.sizeBytes) }));
   if (file.status === "done") {
@@ -244,7 +326,7 @@ function fileRow(file) {
       onclick: () => revealItemInDir(file.output),
     }));
   }
-  if (file.status === "failed" && file.message) meta.append(el("span", { textContent: file.message }));
+  if (file.status === "failed" && file.message) meta.append(el("span", { className: "error", textContent: file.message }));
 
   const side = el("div", { className: "file-side" },
     el("span", { className: `status ${file.status}`, textContent: statusText(file), title: file.message || "" }));
@@ -256,7 +338,7 @@ function fileRow(file) {
       title: t("remove"),
       ariaLabel: t("remove"),
       onclick: () => {
-        state.files = state.files.filter((f) => f !== file);
+        state.files[state.tab] = currentFiles().filter((f) => f !== file);
         render();
       },
     }));
@@ -280,8 +362,9 @@ function fileRow(file) {
 
   if (file.status === "running" || file.status === "queued") {
     const fill = el("div");
-    fill.style.width = file.total ? `${(100 * file.done) / file.total}%` : "0";
-    li.append(el("div", { className: "bar" }, fill));
+    const indeterminate = file.status === "running" && !file.total;
+    fill.style.width = indeterminate ? "40%" : file.total ? `${(100 * file.done) / file.total}%` : "0";
+    li.append(el("div", { className: `bar${indeterminate ? " indeterminate" : ""}` }, fill));
   }
   return li;
 }
@@ -289,31 +372,50 @@ function fileRow(file) {
 function render() {
   document.documentElement.lang = state.lang;
   for (const node of document.querySelectorAll("[data-i18n]")) node.textContent = t(node.dataset.i18n);
+  for (const node of document.querySelectorAll("[data-i18n-placeholder]")) node.placeholder = t(node.dataset.i18nPlaceholder);
   $("lang").textContent = state.lang === "th" ? "English" : "ไทย";
+  $("drop-hint").textContent = t(HINT[state.tab]);
+  $("start").textContent = t(START_LABEL[state.tab]);
 
+  for (const btn of $("tabs").children) {
+    const active = btn.dataset.tab === state.tab;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", String(active));
+    btn.disabled = state.running && !active;
+  }
+  for (const panel of document.querySelectorAll("[data-panel]")) panel.hidden = panel.dataset.panel !== state.tab;
+
+  const files = currentFiles();
   const list = $("files");
-  list.replaceChildren(...state.files.map(fileRow));
-  list.hidden = state.files.length === 0;
-  $("drop").classList.toggle("compact", state.files.length > 0);
+  list.replaceChildren(...files.map(fileRow));
+  list.hidden = files.length === 0;
+  $("drop").classList.toggle("compact", files.length > 0);
 
   const s = state.settings;
-  for (const btn of $("dpi").children) btn.classList.toggle("active", Number(btn.dataset.value) === s.dpi);
-  $("quality").value = s.quality;
-  $("quality-out").textContent = s.quality;
-  $("gray").checked = s.grayscale;
-  $("suffix").value = s.suffix;
+  for (const group of document.querySelectorAll("[data-setting]")) {
+    const [tab, key] = group.dataset.setting.split(".");
+    for (const btn of group.children) {
+      btn.classList.toggle("active", String(s[tab][key]) === btn.dataset.value);
+      btn.disabled = state.running;
+    }
+  }
+  $("quality").value = s.flatten.quality;
+  $("quality-out").textContent = s.flatten.quality;
+  $("gray").checked = s.flatten.grayscale;
+  for (const input of document.querySelectorAll("[data-suffix]")) input.value = s[input.dataset.suffix].suffix;
+  $("pages").value = s.images.pages;
   $("outdir").textContent = s.outputDir || t("sameFolderPath");
   $("outdir").title = s.outputDir || "";
   $("reset-dir").hidden = !s.outputDir;
 
-  const pages = state.files.reduce((sum, f) => sum + (f.pages || 0), 0);
-  $("summary").textContent = state.files.length ? t("summary", state.files.length, pages) : "";
+  const pages = files.reduce((sum, f) => sum + (f.pages || 0), 0);
+  $("summary").textContent = files.length ? t("summary", files.length, pages) : "";
 
   const busy = state.running;
-  for (const id of ["add", "clear", "choose-dir", "reset-dir", "quality", "gray", "suffix"]) $(id).disabled = busy;
-  for (const btn of $("dpi").children) btn.disabled = busy;
+  for (const id of ["add", "clear", "choose-dir", "reset-dir", "quality", "gray", "pages"]) $(id).disabled = busy;
+  for (const input of document.querySelectorAll("[data-suffix]")) input.disabled = busy;
   $("start").hidden = busy;
-  $("start").disabled = !state.files.some(runnable);
+  $("start").disabled = !files.some(runnable);
   $("cancel").hidden = !busy;
 }
 
@@ -327,7 +429,7 @@ function toast(message) {
 }
 
 function saveSettings() {
-  store.set("settings", state.settings);
+  store.set("settings.v2", state.settings);
   render();
 }
 
@@ -339,19 +441,42 @@ $("lang").onclick = () => {
   render();
 };
 
+for (const btn of $("tabs").children) {
+  btn.onclick = () => {
+    if (state.running) return;
+    state.tab = btn.dataset.tab;
+    store.set("tab", state.tab);
+    render();
+  };
+}
+
 $("add").onclick = async () => {
   const picked = await open({ multiple: true, filters: [{ name: "PDF", extensions: ["pdf", "PDF"] }] });
   if (picked) await addPaths(Array.isArray(picked) ? picked : [picked]);
 };
 
-for (const btn of $("dpi").children) {
-  btn.onclick = () => { state.settings.dpi = Number(btn.dataset.value); saveSettings(); };
+for (const group of document.querySelectorAll("[data-setting]")) {
+  const [tab, key] = group.dataset.setting.split(".");
+  for (const btn of group.children) {
+    btn.onclick = () => {
+      const raw = btn.dataset.value;
+      state.settings[tab][key] = /^\d+$/.test(raw) ? Number(raw) : raw;
+      saveSettings();
+    };
+  }
 }
-$("quality").oninput = (e) => { state.settings.quality = Number(e.target.value); saveSettings(); };
-$("gray").onchange = (e) => { state.settings.grayscale = e.target.checked; saveSettings(); };
-$("suffix").onchange = (e) => {
-  // Keep the suffix safe for file names on every OS.
-  state.settings.suffix = e.target.value.replace(/[\\/:*?"<>|]/g, "").trim() || DEFAULT_SETTINGS.suffix;
+$("quality").oninput = (e) => { state.settings.flatten.quality = Number(e.target.value); saveSettings(); };
+$("gray").onchange = (e) => { state.settings.flatten.grayscale = e.target.checked; saveSettings(); };
+for (const input of document.querySelectorAll("[data-suffix]")) {
+  input.onchange = (e) => {
+    const tab = input.dataset.suffix;
+    // Keep the suffix safe for file names on every OS.
+    state.settings[tab].suffix = e.target.value.replace(/[\\/:*?"<>|]/g, "").trim() || DEFAULT_SETTINGS[tab].suffix;
+    saveSettings();
+  };
+}
+$("pages").onchange = (e) => {
+  state.settings.images.pages = e.target.value.replace(/[^\d,\-\s]/g, "").trim();
   saveSettings();
 };
 $("choose-dir").onclick = async () => {
@@ -360,7 +485,7 @@ $("choose-dir").onclick = async () => {
 };
 $("reset-dir").onclick = () => { state.settings.outputDir = null; saveSettings(); };
 
-$("clear").onclick = () => { state.files = []; render(); };
+$("clear").onclick = () => { state.files[state.tab] = []; render(); };
 $("start").onclick = start;
 $("cancel").onclick = () => invoke("cancel");
 

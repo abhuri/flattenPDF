@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "FlattenPDF",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "identifier": "io.github.abhuri.flattenpdf",
   "build": {
     "frontendDist": "../ui"
@@ -26,8 +26,8 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
-    "shortDescription": "Flatten PDF pages into images",
-    "longDescription": "Converts every page of a PDF into an image so text cannot be selected, searched or edited, and forms, layers and metadata are removed.",
+    "shortDescription": "Flatten, unlock and export PDF pages",
+    "longDescription": "Offline PDF tools: flatten every page into an image so text cannot be selected or edited, remove passwords and restrictions, and export pages as PNG images.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

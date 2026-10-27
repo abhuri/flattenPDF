@@ -12,23 +12,28 @@
       <img src="icon.png" alt="" width="28" height="28">
       <h1>FlattenPDF</h1>
     </div>
+    <nav class="tabs" id="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="flatten"><span aria-hidden="true">🔒</span> <span data-i18n="tabFlatten"></span></button>
+      <button type="button" role="tab" data-tab="unlock"><span aria-hidden="true">🔓</span> <span data-i18n="tabUnlock"></span></button>
+      <button type="button" role="tab" data-tab="images"><span aria-hidden="true">🖼️</span> <span data-i18n="tabImages"></span></button>
+    </nav>
     <button id="lang" class="ghost small" type="button">ไทย</button>
   </header>
 
   <main>
     <section id="drop" class="drop">
       <p class="drop-title" data-i18n="dropTitle"></p>
-      <p class="drop-hint" data-i18n="dropHint"></p>
+      <p class="drop-hint" id="drop-hint"></p>
       <p class="drop-more" data-i18n="dropMore"></p>
       <button id="add" type="button" class="secondary" data-i18n="addFiles"></button>
     </section>
 
     <ul id="files" class="files" hidden></ul>
 
-    <section class="settings">
+    <section class="settings" data-panel="flatten">
       <div class="field">
         <span class="label" data-i18n="resolution"></span>
-        <div class="segmented" id="dpi">
+        <div class="segmented" data-setting="flatten.dpi">
           <button type="button" data-value="150"><b>150</b> <span data-i18n="dpiSmall"></span></button>
           <button type="button" data-value="200"><b>200</b> <span data-i18n="dpiBalanced"></span></button>
           <button type="button" data-value="300"><b>300</b> <span data-i18n="dpiSharp"></span></button>
@@ -42,16 +47,58 @@
         <label class="switch"><input id="gray" type="checkbox"><span data-i18n="grayscale"></span></label>
       </div>
       <div class="field">
+        <label class="label" for="flatten-suffix" data-i18n="suffix"></label>
+        <input id="flatten-suffix" type="text" spellcheck="false" data-suffix="flatten">
+      </div>
+    </section>
+
+    <section class="settings" data-panel="unlock">
+      <p class="note full" data-i18n="unlockNote"></p>
+      <div class="field">
+        <label class="label" for="unlock-suffix" data-i18n="suffix"></label>
+        <input id="unlock-suffix" type="text" spellcheck="false" data-suffix="unlock">
+      </div>
+    </section>
+
+    <section class="settings" data-panel="images">
+      <div class="field">
+        <span class="label" data-i18n="resolution"></span>
+        <div class="segmented" data-setting="images.dpi">
+          <button type="button" data-value="150"><b>150</b> <span data-i18n="dpiSmall"></span></button>
+          <button type="button" data-value="200"><b>200</b> <span data-i18n="dpiBalanced"></span></button>
+          <button type="button" data-value="300"><b>300</b> <span data-i18n="dpiSharp"></span></button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label" data-i18n="rotate"></span>
+        <div class="segmented" data-setting="images.rotation">
+          <button type="button" data-value="none" data-i18n="rotNone"></button>
+          <button type="button" data-value="left">⟲ <span data-i18n="rotLeft"></span></button>
+          <button type="button" data-value="right">⟳ <span data-i18n="rotRight"></span></button>
+          <button type="button" data-value="half">↻ 180°</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label" data-i18n="packaging"></span>
+        <div class="segmented" data-setting="images.packaging">
+          <button type="button" data-value="folder">📁 <span data-i18n="packFolder"></span></button>
+          <button type="button" data-value="zip">🗜️ .zip</button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label" for="pages" data-i18n="pageRange"></label>
+        <input id="pages" type="text" spellcheck="false" data-i18n-placeholder="pageRangeHint">
+      </div>
+    </section>
+
+    <section class="settings">
+      <div class="field full">
         <span class="label" data-i18n="saveTo"></span>
         <div class="row">
           <span id="outdir" class="path"></span>
           <button id="choose-dir" type="button" class="ghost small" data-i18n="change"></button>
           <button id="reset-dir" type="button" class="ghost small" data-i18n="sameFolder" hidden></button>
         </div>
-      </div>
-      <div class="field">
-        <label class="label" for="suffix" data-i18n="suffix"></label>
-        <input id="suffix" type="text" spellcheck="false">
       </div>
     </section>
   </main>
@@ -60,7 +107,7 @@
     <span id="summary" class="muted"></span>
     <div class="actions">
       <button id="clear" type="button" class="ghost" data-i18n="clear"></button>
-      <button id="start" type="button" class="primary" data-i18n="start"></button>
+      <button id="start" type="button" class="primary"></button>
       <button id="cancel" type="button" class="danger" data-i18n="cancel" hidden></button>
     </div>
   </footer>

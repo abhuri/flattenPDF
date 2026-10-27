@@ -1,56 +1,29 @@
-//! FlattenPDF core: renders every page of a PDF to an image and writes a new
-//! PDF that contains only those images.
+//! FlattenPDF core.
 //!
-//! Pipeline (memory stays bounded no matter how many pages):
+//! - [`flatten`]: render every page to an image and write an image-only PDF
+//! - [`unlock`]: remove passwords and permission restrictions, keeping content
+//! - [`to_images`]: export pages as PNG files into a folder or a ZIP archive
 //!
-//! ```text
-//! [render thread: PDFium] --bitmaps--> [N encoder threads: JPEG] --jpegs--> [writer thread: in-order PDF]
-//! ```
-//!
-//! PDFium is not thread-safe, so rendering happens on the calling thread only;
-//! JPEG encoding, the other expensive step, runs in parallel.
+//! Rendering runs through one bounded pipeline (see `pipeline.rs`), so memory
+//! stays flat no matter how many pages a document has.
 
+mod flatten;
+mod images;
 mod pdf_writer;
+mod pipeline;
+mod unlock;
 
-use std::collections::BTreeMap;
-use std::fs::{self, File};
-use std::io::BufWriter;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crossbeam_channel::bounded;
 use pdfium_render::prelude::*;
 
+pub use flatten::{flatten, FlattenOptions};
+pub use images::{parse_page_ranges, to_images, ImageOptions, Packaging, Rotation};
 pub use pdf_writer::{ColorSpace, ImagePage, ImagePdfWriter};
 pub use pdfium_render::prelude::Pdfium;
-
-/// Largest bitmap edge we will render. Keeps huge drawings (A0 at high DPI)
-/// within JPEG limits and a sane memory budget.
-const MAX_PIXEL_DIMENSION: f32 = 14_000.0;
-
-#[derive(Debug, Clone)]
-pub struct Options {
-    pub dpi: f32,
-    /// JPEG quality, 1-100.
-    pub jpeg_quality: u8,
-    pub grayscale: bool,
-    pub password: Option<String>,
-    /// Number of JPEG encoder threads. 0 means "use all cores".
-    pub threads: usize,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            dpi: 200.0,
-            jpeg_quality: 85,
-            grayscale: false,
-            password: None,
-            threads: 0,
-        }
-    }
-}
+pub use unlock::{inspect_security, unlock, Security, UnlockOptions};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Progress {
@@ -61,7 +34,10 @@ pub enum Progress {
 #[derive(Debug, Clone)]
 pub struct Summary {
     pub pages: usize,
+    /// Size of the output file, or total size of all files written.
     pub output_bytes: u64,
+    /// Where the result went (file, folder or archive).
+    pub output: PathBuf,
     pub elapsed: Duration,
 }
 
@@ -73,9 +49,11 @@ pub enum FlattenError {
     PasswordRequired,
     #[error("PDFium error: {0:?}")]
     Pdfium(PdfiumError),
+    #[error("PDFium could not {0}")]
+    PdfiumFailed(&'static str),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("JPEG encoding failed on page {page}: {message}")]
+    #[error("encoding failed on page {page}: {message}")]
     Encode { page: usize, message: String },
     #[error("invalid options: {0}")]
     InvalidOptions(String),
@@ -94,9 +72,37 @@ impl From<PdfiumError> for FlattenError {
     }
 }
 
+/// A loaded PDFium library.
+///
+/// Besides the high-level [`Pdfium`] API this keeps a second set of raw
+/// bindings for the few calls `pdfium-render` does not expose (saving with
+/// `FPDF_REMOVE_SECURITY`). Both sets go through the same process-wide lock
+/// of the `thread_safe` feature, so they can be used from any thread.
+pub struct Engine {
+    pdfium: Pdfium,
+    raw: RawBindings,
+}
+
+struct RawBindings(Box<dyn PdfiumLibraryBindings>);
+
+// SAFETY: with the `thread_safe` feature every call is serialized through
+// pdfium-render's global PdfiumThreadMarshall mutex.
+unsafe impl Send for RawBindings {}
+unsafe impl Sync for RawBindings {}
+
+impl Engine {
+    pub fn pdfium(&self) -> &Pdfium {
+        &self.pdfium
+    }
+
+    fn raw(&self) -> &dyn PdfiumLibraryBindings {
+        self.raw.0.as_ref()
+    }
+}
+
 /// Binds to the PDFium shared library. Looks next to the executable first,
 /// then in `extra_dir`, then the current directory, then the system paths.
-pub fn load_pdfium(extra_dir: Option<&Path>) -> Result<Pdfium, FlattenError> {
+pub fn load_engine(extra_dir: Option<&Path>) -> Result<Engine, FlattenError> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(dir) = std::env::current_exe()
         .ok()
@@ -109,19 +115,21 @@ pub fn load_pdfium(extra_dir: Option<&Path>) -> Result<Pdfium, FlattenError> {
     }
     candidates.push(PathBuf::from("."));
 
+    // Binding twice must happen before `Pdfium::new` publishes the first set.
     let mut errors = Vec::new();
     for dir in &candidates {
         let lib = Pdfium::pdfium_platform_library_name_at_path(dir);
         if !lib.exists() {
             continue;
         }
-        match Pdfium::bind_to_library(&lib) {
-            Ok(bindings) => return Ok(Pdfium::new(bindings)),
+        match Pdfium::bind_to_library(&lib).and_then(|a| Ok((a, Pdfium::bind_to_library(&lib)?))) {
+            Ok((bindings, raw)) => return Ok(new_engine(bindings, raw)),
             Err(err) => errors.push(format!("{}: {err:?}", lib.display())),
         }
     }
-    match Pdfium::bind_to_system_library() {
-        Ok(bindings) => Ok(Pdfium::new(bindings)),
+    match Pdfium::bind_to_system_library().and_then(|a| Ok((a, Pdfium::bind_to_system_library()?)))
+    {
+        Ok((bindings, raw)) => Ok(new_engine(bindings, raw)),
         Err(err) => {
             errors.push(format!("system library: {err:?}"));
             Err(FlattenError::PdfiumNotFound(errors.join("; ")))
@@ -129,165 +137,26 @@ pub fn load_pdfium(extra_dir: Option<&Path>) -> Result<Pdfium, FlattenError> {
     }
 }
 
-struct RenderedPage {
-    index: usize,
-    width: u32,
-    height: u32,
-    /// Pixels in R, G, B, A byte order.
-    rgba: Vec<u8>,
-    width_pt: f64,
-    height_pt: f64,
+fn new_engine(
+    bindings: Box<dyn PdfiumLibraryBindings>,
+    raw: Box<dyn PdfiumLibraryBindings>,
+) -> Engine {
+    Engine {
+        pdfium: Pdfium::new(bindings),
+        raw: RawBindings(raw),
+    }
 }
 
-struct EncodedPage {
-    index: usize,
-    width: u32,
-    height: u32,
-    jpeg: Vec<u8>,
-    width_pt: f64,
-    height_pt: f64,
-}
-
-/// Flattens `input` into an image-only PDF at `output`.
-///
-/// The result is written to a temporary `*.part` file next to `output` and
-/// renamed only on success, so a failure or cancellation never leaves a
-/// half-written PDF behind. `on_progress` may be called from a worker thread.
-pub fn flatten(
-    pdfium: &Pdfium,
-    input: &Path,
-    output: &Path,
-    opts: &Options,
-    cancel: &AtomicBool,
-    on_progress: &(dyn Fn(Progress) + Sync),
-) -> Result<Summary, FlattenError> {
-    validate(input, output, opts)?;
-    let started = Instant::now();
-
-    let document = pdfium.load_pdf_from_file(input, opts.password.as_deref())?;
-    let pages = document.pages();
-    let total_pages = pages.len() as usize;
-    on_progress(Progress::Started { total_pages });
-
-    let threads = match opts.threads {
+fn worker_threads(requested: usize) -> usize {
+    match requested {
         0 => std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4),
         n => n,
-    };
-    let temp_path = part_path(output);
-
-    let result = std::thread::scope(|scope| -> Result<(), FlattenError> {
-        // Bounded queues are what cap memory: at most ~2 bitmaps per thread in flight.
-        let (render_tx, render_rx) = bounded::<RenderedPage>(threads * 2);
-        let (encoded_tx, encoded_rx) = bounded::<Result<EncodedPage, FlattenError>>(threads * 2);
-
-        for _ in 0..threads {
-            let render_rx = render_rx.clone();
-            let encoded_tx = encoded_tx.clone();
-            let quality = opts.jpeg_quality;
-            let grayscale = opts.grayscale;
-            scope.spawn(move || {
-                for page in render_rx {
-                    if encoded_tx
-                        .send(encode_page(page, quality, grayscale))
-                        .is_err()
-                    {
-                        break; // writer gave up
-                    }
-                }
-            });
-        }
-        drop(render_rx);
-        drop(encoded_tx);
-
-        let temp_path = &temp_path;
-        let writer = scope.spawn(move || -> Result<(), FlattenError> {
-            let file = BufWriter::with_capacity(1 << 20, File::create(temp_path)?);
-            let mut pdf = ImagePdfWriter::new(file)?;
-            let color_space = || {
-                if opts.grayscale {
-                    ColorSpace::Gray
-                } else {
-                    ColorSpace::Rgb
-                }
-            };
-            // Encoders finish out of order; hold early pages until their turn.
-            let mut pending: BTreeMap<usize, EncodedPage> = BTreeMap::new();
-            for encoded in encoded_rx {
-                let encoded = encoded?;
-                pending.insert(encoded.index, encoded);
-                while let Some(page) = pending.remove(&pdf.page_count()) {
-                    pdf.add_page(&ImagePage {
-                        jpeg: &page.jpeg,
-                        pixel_width: page.width,
-                        pixel_height: page.height,
-                        color_space: color_space(),
-                        width_pt: page.width_pt,
-                        height_pt: page.height_pt,
-                    })?;
-                    on_progress(Progress::PageDone {
-                        done: pdf.page_count(),
-                        total_pages,
-                    });
-                }
-            }
-            if pdf.page_count() != total_pages {
-                return Err(FlattenError::Cancelled);
-            }
-            pdf.finish()?
-                .into_inner()
-                .map_err(|e| e.into_error())?
-                .sync_all()?;
-            Ok(())
-        });
-
-        let render_result = (|| -> Result<(), FlattenError> {
-            for index in 0..total_pages {
-                if cancel.load(Ordering::Relaxed) {
-                    return Err(FlattenError::Cancelled);
-                }
-                let page = pages.get(index as _)?;
-                let rendered = render_page(&page, index, opts.dpi)?;
-                if render_tx.send(rendered).is_err() {
-                    break; // writer failed; its error is reported below
-                }
-            }
-            Ok(())
-        })();
-        drop(render_tx);
-
-        let writer_result = writer.join().expect("writer thread panicked");
-        render_result.and(writer_result)
-    });
-
-    match result {
-        Ok(()) => {
-            fs::rename(&temp_path, output)?;
-            Ok(Summary {
-                pages: total_pages,
-                output_bytes: fs::metadata(output)?.len(),
-                elapsed: started.elapsed(),
-            })
-        }
-        Err(err) => {
-            let _ = fs::remove_file(&temp_path);
-            Err(err)
-        }
     }
 }
 
-fn validate(input: &Path, output: &Path, opts: &Options) -> Result<(), FlattenError> {
-    if !(36.0..=600.0).contains(&opts.dpi) {
-        return Err(FlattenError::InvalidOptions(
-            "DPI must be between 36 and 600".into(),
-        ));
-    }
-    if !(1..=100).contains(&opts.jpeg_quality) {
-        return Err(FlattenError::InvalidOptions(
-            "JPEG quality must be between 1 and 100".into(),
-        ));
-    }
+fn ensure_not_input(input: &Path, output: &Path) -> Result<(), FlattenError> {
     let same_file = match (input.canonicalize(), output.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
         _ => false,
@@ -300,89 +169,27 @@ fn validate(input: &Path, output: &Path, opts: &Options) -> Result<(), FlattenEr
     Ok(())
 }
 
+fn validate_dpi(dpi: f32) -> Result<(), FlattenError> {
+    if !(36.0..=600.0).contains(&dpi) {
+        return Err(FlattenError::InvalidOptions(
+            "DPI must be between 36 and 600".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// `out.pdf` -> `out.pdf.part`: results are written there and renamed only on
+/// success, so a failure or cancellation never leaves a half-written output.
 fn part_path(output: &Path) -> PathBuf {
     let mut name = output.file_name().unwrap_or_default().to_os_string();
     name.push(".part");
     output.with_file_name(name)
 }
 
-fn render_page(page: &PdfPage, index: usize, dpi: f32) -> Result<RenderedPage, FlattenError> {
-    let mut scale = dpi / 72.0;
-    let longest_pt = page.width().value.max(page.height().value);
-    if longest_pt * scale > MAX_PIXEL_DIMENSION {
-        scale = MAX_PIXEL_DIMENSION / longest_pt;
-    }
-    // A BGRA bitmap with FPDF_REVERSE_BYTE_ORDER holds R, G, B, A in memory.
-    // Set the flag explicitly: pdfium-render enables it by default, and getting
-    // the order wrong swaps red and blue in the output.
-    let config = PdfRenderConfig::new()
-        .scale_page_by_factor(scale)
-        .set_format(PdfBitmapFormat::BGRA)
-        .set_reverse_byte_order(true)
-        .set_clear_color(PdfColor::WHITE)
-        .render_form_data(true)
-        .render_annotations(true);
-    let bitmap = page.render_with_config(&config)?;
-    let (width, height) = (bitmap.width() as u32, bitmap.height() as u32);
-    // Keep the exact original page size (pixel counts are rounded). The bitmap
-    // already has page rotation applied, so follow its orientation.
-    let (mut width_pt, mut height_pt) = (page.width().value as f64, page.height().value as f64);
-    if (width > height) != (width_pt > height_pt) {
-        std::mem::swap(&mut width_pt, &mut height_pt);
-    }
-    Ok(RenderedPage {
-        index,
-        width,
-        height,
-        rgba: bitmap.as_raw_bytes(),
-        width_pt,
-        height_pt,
-    })
-}
-
-fn encode_page(
-    page: RenderedPage,
-    quality: u8,
-    grayscale: bool,
-) -> Result<EncodedPage, FlattenError> {
-    use jpeg_encoder::{ColorType, Encoder};
-
-    let fail = |e: jpeg_encoder::EncodingError| FlattenError::Encode {
-        page: page.index + 1,
-        message: e.to_string(),
-    };
-    let mut jpeg = Vec::with_capacity(page.rgba.len() / 10);
-    let encoder = Encoder::new(&mut jpeg, quality);
-    if grayscale {
-        let luma: Vec<u8> = page
-            .rgba
-            .chunks_exact(4)
-            .map(|px| ((px[0] as u32 * 299 + px[1] as u32 * 587 + px[2] as u32 * 114) / 1000) as u8)
-            .collect();
-        encoder
-            .encode(
-                &luma,
-                page.width as u16,
-                page.height as u16,
-                ColorType::Luma,
-            )
-            .map_err(fail)?;
+fn remove_part(path: &Path) {
+    let _ = if path.is_dir() {
+        fs::remove_dir_all(path)
     } else {
-        encoder
-            .encode(
-                &page.rgba,
-                page.width as u16,
-                page.height as u16,
-                ColorType::Rgba,
-            )
-            .map_err(fail)?;
-    }
-    Ok(EncodedPage {
-        index: page.index,
-        width: page.width,
-        height: page.height,
-        jpeg,
-        width_pt: page.width_pt,
-        height_pt: page.height_pt,
-    })
+        fs::remove_file(path)
+    };
 }
