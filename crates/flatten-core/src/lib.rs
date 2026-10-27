@@ -324,14 +324,19 @@ fn render_page(page: &PdfPage, index: usize, dpi: f32) -> Result<RenderedPage, F
         .render_annotations(true);
     let bitmap = page.render_with_config(&config)?;
     let (width, height) = (bitmap.width() as u32, bitmap.height() as u32);
-    // Derive the page size from the bitmap so page rotation is already applied.
+    // Keep the exact original page size (pixel counts are rounded). The bitmap
+    // already has page rotation applied, so follow its orientation.
+    let (mut width_pt, mut height_pt) = (page.width().value as f64, page.height().value as f64);
+    if (width > height) != (width_pt > height_pt) {
+        std::mem::swap(&mut width_pt, &mut height_pt);
+    }
     Ok(RenderedPage {
         index,
         width,
         height,
         rgba: bitmap.as_raw_bytes(),
-        width_pt: width as f64 * 72.0 / scale as f64,
-        height_pt: height as f64 * 72.0 / scale as f64,
+        width_pt,
+        height_pt,
     })
 }
 

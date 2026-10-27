@@ -1,5 +1,5 @@
-//! End-to-end color check: flatten a PDF with known colors, decode the JPEG
-//! that ends up in the output and make sure the colors survived.
+//! End-to-end checks: flatten a PDF with known colors and page size, then
+//! inspect the output PDF and the JPEG inside it.
 //!
 //! Needs the PDFium library in `<repo>/pdfium` (see scripts/fetch-pdfium.sh);
 //! the tests are skipped with a message when it is missing.
@@ -23,13 +23,14 @@ fn pdfium() -> Option<&'static Pdfium> {
         .as_ref()
 }
 
-/// A 100x100 pt page: left half pure red, right half pure blue.
-fn red_blue_pdf() -> Vec<u8> {
+/// A page with the left 50 pt filled pure red and the next 50 pt pure blue.
+/// `page_attrs` sets the page geometry, e.g. `/MediaBox [0 0 100 100]`.
+fn red_blue_pdf(page_attrs: &str) -> Vec<u8> {
     let content = "1 0 0 rg 0 0 50 100 re f 0 0 1 rg 50 0 50 100 re f";
     let objects = [
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>".to_string(),
+        format!("<< /Type /Page /Parent 2 0 R {page_attrs} /Contents 4 0 R >>"),
         format!(
             "<< /Length {} >>\nstream\n{content}\nendstream",
             content.len()
@@ -65,39 +66,45 @@ fn find(haystack: &[u8], needle: &[u8], from: usize) -> usize {
         .expect("pattern not found")
 }
 
-/// Flattens the red/blue page and returns (pixels, width, components) of its JPEG.
-fn flatten_and_decode(name: &str, grayscale: bool) -> Option<(Vec<u8>, usize, usize)> {
+/// Flattens the red/blue page and returns the bytes of the output PDF.
+fn flatten_test_pdf(name: &str, page_attrs: &str, opts: &Options) -> Option<Vec<u8>> {
     let pdfium = pdfium()?;
     let dir: PathBuf =
         std::env::temp_dir().join(format!("flattenpdf-test-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let input = dir.join("in.pdf");
     let output = dir.join("out.pdf");
-    std::fs::write(&input, red_blue_pdf()).unwrap();
+    std::fs::write(&input, red_blue_pdf(page_attrs)).unwrap();
 
-    let opts = Options {
-        dpi: 72.0,
-        jpeg_quality: 95,
-        grayscale,
-        ..Options::default()
-    };
     flatten(
         pdfium,
         &input,
         &output,
-        &opts,
+        opts,
         &AtomicBool::new(false),
         &|_| {},
     )
     .unwrap();
 
     let out = std::fs::read(&output).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    Some(out)
+}
+
+/// Flattens the red/blue page and returns (pixels, width, components) of its JPEG.
+fn flatten_and_decode(name: &str, grayscale: bool) -> Option<(Vec<u8>, usize, usize)> {
+    let opts = Options {
+        dpi: 72.0,
+        jpeg_quality: 95,
+        grayscale,
+        ..Options::default()
+    };
+    let out = flatten_test_pdf(name, "/MediaBox [0 0 100 100]", &opts)?;
     let start = find(&out, b"stream\n", find(&out, b"/DCTDecode", 0)) + b"stream\n".len();
     let end = find(&out, b"\nendstream", start);
     let mut decoder = jpeg_decoder::Decoder::new(&out[start..end]);
     let pixels = decoder.decode().unwrap();
     let info = decoder.info().unwrap();
-    std::fs::remove_dir_all(&dir).ok();
     Some((pixels, info.width as usize, pixels_per(info.pixel_format)))
 }
 
@@ -156,5 +163,42 @@ fn grayscale_uses_correct_channel_weights() {
         pixel(&pixels, width, components, 75, 50),
         &[29],
         "blue as gray",
+    );
+}
+
+#[test]
+fn page_size_matches_original() {
+    // 200 DPI so the pixel size differs from the point size; the page must
+    // still come out at its original 100 x 100 pt.
+    let opts = Options {
+        dpi: 200.0,
+        ..Options::default()
+    };
+    let Some(out) = flatten_test_pdf("size", "/MediaBox [0 0 100 100]", &opts) else {
+        return;
+    };
+    let at = find(&out, b"/MediaBox [", 0) + b"/MediaBox [".len();
+    let end = find(&out, b"]", at);
+    let media_box = std::str::from_utf8(&out[at..end]).unwrap();
+    assert_eq!(media_box, "0 0 100 100");
+}
+
+#[test]
+fn rotated_page_keeps_its_displayed_orientation() {
+    // A 200 x 100 pt landscape MediaBox rotated 90 degrees displays as portrait.
+    let Some(out) = flatten_test_pdf(
+        "rotate",
+        "/MediaBox [0 0 200 100] /Rotate 90",
+        &Options::default(),
+    ) else {
+        return;
+    };
+    let at = find(&out, b"/MediaBox [", 0) + b"/MediaBox [".len();
+    let end = find(&out, b"]", at);
+    let media_box = std::str::from_utf8(&out[at..end]).unwrap();
+    assert_eq!(media_box, "0 0 100 200");
+    assert!(
+        !out.windows(7).any(|w| w == b"/Rotate"),
+        "rotation must be baked into the image"
     );
 }
