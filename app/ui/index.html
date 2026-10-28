@@ -19,12 +19,10 @@
     </nav>
     <div class="header-toggles">
       <button id="theme-toggle" class="toggle" type="button" role="switch">
-        <span class="thumb" aria-hidden="true"></span>
         <span class="opt emoji" data-opt="light" aria-hidden="true">🌞</span>
         <span class="opt emoji" data-opt="dark" aria-hidden="true">🌛</span>
       </button>
       <button id="lang-toggle" class="toggle" type="button" role="switch">
-        <span class="thumb" aria-hidden="true"></span>
         <span class="opt" data-opt="th" aria-hidden="true">TH</span>
         <span class="opt" data-opt="en" aria-hidden="true">EN</span>
       </button>
@@ -161,17 +159,19 @@
 
         <div class="field">
           <span class="label" data-i18n="position"></span>
-          <div class="position-grid" id="wm-position">
-            <button type="button" data-value="topLeft" aria-label="↖">↖</button>
-            <button type="button" data-value="top" aria-label="↑">↑</button>
-            <button type="button" data-value="topRight" aria-label="↗">↗</button>
-            <button type="button" data-value="left" aria-label="←">←</button>
-            <button type="button" data-value="center" aria-label="•">•</button>
-            <button type="button" data-value="right" aria-label="→">→</button>
-            <button type="button" data-value="bottomLeft" aria-label="↙">↙</button>
-            <button type="button" data-value="bottom" aria-label="↓">↓</button>
-            <button type="button" data-value="bottomRight" aria-label="↘">↘</button>
-            <button type="button" data-value="tile" class="tile" data-i18n="tile"></button>
+          <div class="position-picker" id="wm-position">
+            <div class="position-grid">
+              <button type="button" data-value="topLeft" aria-label="↖">↖</button>
+              <button type="button" data-value="top" aria-label="↑">↑</button>
+              <button type="button" data-value="topRight" aria-label="↗">↗</button>
+              <button type="button" data-value="left" aria-label="←">←</button>
+              <button type="button" data-value="center" aria-label="•">•</button>
+              <button type="button" data-value="right" aria-label="→">→</button>
+              <button type="button" data-value="bottomLeft" aria-label="↙">↙</button>
+              <button type="button" data-value="bottom" aria-label="↓">↓</button>
+              <button type="button" data-value="bottomRight" aria-label="↘">↘</button>
+            </div>
+            <button type="button" data-value="tile" class="tile">▦ <span data-i18n="tile"></span></button>
           </div>
         </div>
 

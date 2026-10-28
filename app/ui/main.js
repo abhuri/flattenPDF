@@ -180,8 +180,7 @@ const currentTheme = () => state.theme ?? (systemDark.matches ? "dark" : "light"
 function setToggle(toggle, value, label) {
   const options = [...toggle.querySelectorAll(".opt")];
   for (const opt of options) opt.classList.toggle("active", opt.dataset.opt === value);
-  toggle.dataset.on = options[1].dataset.opt === value ? "right" : "left";
-  toggle.setAttribute("aria-checked", String(toggle.dataset.on === "right"));
+  toggle.setAttribute("aria-checked", String(options[1].dataset.opt === value));
   toggle.setAttribute("aria-label", label);
   toggle.title = label;
 }

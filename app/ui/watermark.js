@@ -429,7 +429,7 @@ function renderWatermark() {
   $("wm-rotation-out").textContent = `${s.rotation}°`;
   setValue($("wm-opacity"), s.opacity);
   $("wm-opacity-out").textContent = `${s.opacity}%`;
-  for (const btn of $("wm-position").children) {
+  for (const btn of $("wm-position").querySelectorAll("button")) {
     btn.classList.toggle("active", btn.dataset.value === s.position);
     btn.disabled = busy;
   }
@@ -462,7 +462,7 @@ for (const group of document.querySelectorAll("[data-wm]")) {
     btn.onclick = () => update({ [group.dataset.wm]: btn.dataset.value });
   }
 }
-for (const btn of $("wm-position").children) btn.onclick = () => update({ position: btn.dataset.value });
+for (const btn of $("wm-position").querySelectorAll("button")) btn.onclick = () => update({ position: btn.dataset.value });
 for (const btn of $("wm-rotation-quick").children) btn.onclick = () => update({ rotation: Number(btn.dataset.value) });
 
 $("wm-text").oninput = (e) => update({ text: e.target.value });
