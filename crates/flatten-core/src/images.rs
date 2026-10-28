@@ -193,7 +193,12 @@ fn encode_png(page: RenderedPage, rotation: Rotation) -> Result<(usize, Vec<u8>)
 }
 
 /// Drops the alpha channel and rotates clockwise by `rotation`.
-fn rotate_to_rgb(rgba: &[u8], width: u32, height: u32, rotation: Rotation) -> (Vec<u8>, u32, u32) {
+pub(crate) fn rotate_to_rgb(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    rotation: Rotation,
+) -> (Vec<u8>, u32, u32) {
     let (w, h) = (width as usize, height as usize);
     let mut rgb = vec![0u8; w * h * 3];
     let (out_w, out_h) = match rotation {

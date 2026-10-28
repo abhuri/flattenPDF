@@ -115,9 +115,16 @@ const STRINGS = {
   },
 };
 
-const TABS = ["flatten", "images"];
-const START_LABEL = { flatten: "startFlatten", images: "startImages" };
-const HINT = { flatten: "hintFlatten", images: "hintImages" };
+const TABS = ["flatten", "images", "watermark"];
+const START_LABEL = { flatten: "startFlatten", images: "startImages", watermark: "startWatermark" };
+const HINT = { flatten: "hintFlatten", images: "hintImages", watermark: "hintWatermark" };
+
+/**
+ * Extra behaviour for a tab, registered by its own script (watermark.js):
+ * render() refreshes its panel, validate() returns a problem to show or null,
+ * task() resolves to the settings sent to the backend.
+ */
+const tabHooks = {};
 
 const DEFAULT_SETTINGS = {
   outputDir: null,
@@ -143,7 +150,8 @@ function loadSettings() {
   const saved = store.get("settings.v2", {});
   const settings = structuredClone(DEFAULT_SETTINGS);
   settings.outputDir = saved.outputDir ?? null;
-  for (const tab of TABS) Object.assign(settings[tab], saved[tab] || {});
+  // Tabs without defaults here (watermark) keep their own settings.
+  for (const tab of TABS) if (settings[tab]) Object.assign(settings[tab], saved[tab] || {});
   return settings;
 }
 
@@ -155,7 +163,7 @@ const state = {
   theme: ["light", "dark"].includes(store.get("theme", null)) ? store.get("theme", null) : null,
   tab: TABS.includes(store.get("tab", "flatten")) ? store.get("tab", "flatten") : "flatten",
   settings: loadSettings(),
-  files: { flatten: [], images: [] },
+  files: { flatten: [], images: [], watermark: [] },
   nextId: 1,
   running: false,
 };
@@ -237,15 +245,20 @@ function runnable(file) {
   return ["ready", "failed", "cancelled"].includes(file.status);
 }
 
-function taskFor(tab) {
-  const s = state.settings[tab];
-  return { mode: tab, ...s };
+async function taskFor(tab) {
+  if (tabHooks[tab]?.task) return tabHooks[tab].task();
+  return { mode: tab, ...state.settings[tab] };
 }
 
 async function start() {
   const files = currentFiles().filter(runnable);
   if (!files.length) {
     toast(t("nothingToDo"));
+    return;
+  }
+  const problem = tabHooks[state.tab]?.validate?.();
+  if (problem) {
+    toast(problem);
     return;
   }
   for (const f of files) {
@@ -257,7 +270,7 @@ async function start() {
   try {
     await invoke("start", {
       jobs: files.map((f) => ({ id: f.id, input: f.path, password: f.password || null })),
-      task: taskFor(state.tab),
+      task: await taskFor(state.tab),
       outputDir: state.settings.outputDir,
     });
   } catch (err) {
@@ -383,6 +396,7 @@ function render() {
   document.documentElement.lang = state.lang;
   for (const node of document.querySelectorAll("[data-i18n]")) node.textContent = t(node.dataset.i18n);
   for (const node of document.querySelectorAll("[data-i18n-placeholder]")) node.placeholder = t(node.dataset.i18nPlaceholder);
+  for (const node of document.querySelectorAll("[data-i18n-title]")) node.title = t(node.dataset.i18nTitle);
   setToggle($("lang-toggle"), state.lang, t("language"));
   applyTheme();
   $("drop-hint").textContent = t(HINT[state.tab]);
@@ -428,6 +442,7 @@ function render() {
   $("start").hidden = busy;
   $("start").disabled = !files.some(runnable);
   $("cancel").hidden = !busy;
+  tabHooks[state.tab]?.render?.();
 }
 
 let toastTimer;

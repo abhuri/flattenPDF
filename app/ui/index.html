@@ -15,6 +15,7 @@
     <nav class="tabs" id="tabs" role="tablist">
       <button type="button" role="tab" data-tab="flatten"><span aria-hidden="true">🔒</span> <span data-i18n="tabFlatten"></span></button>
       <button type="button" role="tab" data-tab="images"><span aria-hidden="true">🖼️</span> <span data-i18n="tabImages"></span></button>
+      <button type="button" role="tab" data-tab="watermark"><span aria-hidden="true">💧</span> <span data-i18n="tabWatermark"></span></button>
     </nav>
     <div class="header-toggles">
       <button id="theme-toggle" class="toggle" type="button" role="switch">
@@ -93,6 +94,120 @@
       </div>
     </section>
 
+    <section class="settings wm" data-panel="watermark">
+      <div class="field full">
+        <span class="label" data-i18n="profile"></span>
+        <div class="row wrap">
+          <select id="wm-profile"></select>
+          <input id="wm-profile-name" type="text" spellcheck="false" data-i18n-placeholder="profileName">
+          <button id="wm-profile-save" type="button" class="secondary small" data-i18n="saveProfile"></button>
+          <button id="wm-profile-delete" type="button" class="ghost small" data-i18n="deleteProfile"></button>
+        </div>
+      </div>
+
+      <div class="wm-controls">
+        <div class="field">
+          <span class="label" data-i18n="wmType"></span>
+          <div class="segmented" data-wm="type">
+            <button type="button" data-value="text">🔤 <span data-i18n="wmText"></span></button>
+            <button type="button" data-value="image">🖼️ <span data-i18n="wmImage"></span></button>
+          </div>
+        </div>
+
+        <div class="wm-text-only">
+          <div class="field">
+            <label class="label" for="wm-text" data-i18n="wmTextLabel"></label>
+            <textarea id="wm-text" rows="2" spellcheck="false"></textarea>
+          </div>
+          <div class="field">
+            <label class="label" for="wm-font" data-i18n="font"></label>
+            <div class="row">
+              <input id="wm-font" type="text" list="wm-fonts" spellcheck="false">
+              <datalist id="wm-fonts"></datalist>
+              <input id="wm-color" type="color" data-i18n-title="color">
+              <button id="wm-bold" type="button" class="style-btn" data-i18n-title="bold"><b>B</b></button>
+              <button id="wm-italic" type="button" class="style-btn" data-i18n-title="italic"><i>I</i></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="wm-image-only field">
+          <span class="label" data-i18n="wmImageLabel"></span>
+          <div class="row">
+            <img id="wm-image-thumb" class="thumb" alt="" hidden>
+            <span id="wm-image-name" class="path"></span>
+            <button id="wm-image-pick" type="button" class="ghost small" data-i18n="chooseImage"></button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="label" for="wm-size"><span data-i18n="size"></span> <output id="wm-size-out"></output></label>
+          <input id="wm-size" type="range" min="5" max="100" step="1">
+        </div>
+        <div class="field">
+          <label class="label" for="wm-rotation"><span data-i18n="angle"></span> <output id="wm-rotation-out"></output></label>
+          <input id="wm-rotation" type="range" min="-90" max="90" step="1">
+          <div class="quick" id="wm-rotation-quick">
+            <button type="button" class="ghost small" data-value="-45">-45°</button>
+            <button type="button" class="ghost small" data-value="0">0°</button>
+            <button type="button" class="ghost small" data-value="45">45°</button>
+            <button type="button" class="ghost small" data-value="90">90°</button>
+          </div>
+        </div>
+        <div class="field">
+          <label class="label" for="wm-opacity"><span data-i18n="opacity"></span> <output id="wm-opacity-out"></output></label>
+          <input id="wm-opacity" type="range" min="5" max="100" step="1">
+        </div>
+
+        <div class="field">
+          <span class="label" data-i18n="position"></span>
+          <div class="position-grid" id="wm-position">
+            <button type="button" data-value="topLeft" aria-label="↖">↖</button>
+            <button type="button" data-value="top" aria-label="↑">↑</button>
+            <button type="button" data-value="topRight" aria-label="↗">↗</button>
+            <button type="button" data-value="left" aria-label="←">←</button>
+            <button type="button" data-value="center" aria-label="•">•</button>
+            <button type="button" data-value="right" aria-label="→">→</button>
+            <button type="button" data-value="bottomLeft" aria-label="↙">↙</button>
+            <button type="button" data-value="bottom" aria-label="↓">↓</button>
+            <button type="button" data-value="bottomRight" aria-label="↘">↘</button>
+            <button type="button" data-value="tile" class="tile" data-i18n="tile"></button>
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="label" data-i18n="pagesToStamp"></span>
+          <div class="segmented" data-wm="pageMode">
+            <button type="button" data-value="all" data-i18n="pagesAll"></button>
+            <button type="button" data-value="only" data-i18n="pagesOnly"></button>
+            <button type="button" data-value="except" data-i18n="pagesExcept"></button>
+          </div>
+          <input id="wm-pages" type="text" spellcheck="false" data-i18n-placeholder="pagesHint" hidden>
+        </div>
+
+        <div class="field">
+          <label class="switch"><input id="wm-flatten" type="checkbox"><span data-i18n="flattenAfter"></span></label>
+          <span class="note" data-i18n="flattenAfterNote"></span>
+        </div>
+        <div class="field">
+          <label class="label" for="wm-suffix" data-i18n="suffix"></label>
+          <input id="wm-suffix" type="text" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="wm-preview">
+        <div class="preview-frame">
+          <img id="wm-preview-img" alt="" hidden>
+          <span id="wm-preview-msg" class="muted" data-i18n="previewEmpty"></span>
+        </div>
+        <div class="row center">
+          <button id="wm-prev-page" type="button" class="ghost small" aria-label="◀">◀</button>
+          <span id="wm-page-label" class="muted"></span>
+          <button id="wm-next-page" type="button" class="ghost small" aria-label="▶">▶</button>
+        </div>
+      </div>
+    </section>
+
     <section class="settings">
       <div class="field full">
         <span class="label" data-i18n="saveTo"></span>
@@ -117,5 +232,6 @@
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="main.js"></script>
+  <script src="watermark.js"></script>
 </body>
 </html>

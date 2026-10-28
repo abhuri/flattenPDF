@@ -2,6 +2,7 @@
 //!
 //! - [`flatten`]: render every page to an image and write an image-only PDF
 //! - [`to_images`]: export pages as PNG files into a folder or a ZIP archive
+//! - [`watermark`]: stamp an image or rasterized text onto selected pages
 //!
 //! Rendering runs through one bounded pipeline (see `pipeline.rs`), so memory
 //! stays flat no matter how many pages a document has.
@@ -10,6 +11,8 @@ mod flatten;
 mod images;
 mod pdf_writer;
 mod pipeline;
+mod raw;
+mod watermark;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,6 +24,9 @@ pub use flatten::{flatten, FlattenOptions};
 pub use images::{parse_page_ranges, to_images, ImageOptions, Packaging, Rotation};
 pub use pdf_writer::{ColorSpace, ImagePage, ImagePdfWriter};
 pub use pdfium_render::prelude::Pdfium;
+pub use watermark::{
+    watermark, watermark_preview, PageSelection, Position, Stamp, WatermarkOptions,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Progress {
@@ -46,6 +52,8 @@ pub enum FlattenError {
     PasswordRequired,
     #[error("PDFium error: {0:?}")]
     Pdfium(PdfiumError),
+    #[error("PDFium could not {0}")]
+    PdfiumFailed(&'static str),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("encoding failed on page {page}: {message}")]
@@ -82,19 +90,28 @@ pub fn load_pdfium(extra_dir: Option<&Path>) -> Result<Pdfium, FlattenError> {
     }
     candidates.push(PathBuf::from("."));
 
+    // A second set of bindings feeds `raw.rs`; both must be bound before
+    // `Pdfium::new` publishes the first set.
     let mut errors = Vec::new();
     for dir in &candidates {
         let lib = Pdfium::pdfium_platform_library_name_at_path(dir);
         if !lib.exists() {
             continue;
         }
-        match Pdfium::bind_to_library(&lib) {
-            Ok(bindings) => return Ok(Pdfium::new(bindings)),
+        match Pdfium::bind_to_library(&lib).and_then(|a| Ok((a, Pdfium::bind_to_library(&lib)?))) {
+            Ok((bindings, raw_bindings)) => {
+                raw::install(raw_bindings);
+                return Ok(Pdfium::new(bindings));
+            }
             Err(err) => errors.push(format!("{}: {err:?}", lib.display())),
         }
     }
-    match Pdfium::bind_to_system_library() {
-        Ok(bindings) => Ok(Pdfium::new(bindings)),
+    match Pdfium::bind_to_system_library().and_then(|a| Ok((a, Pdfium::bind_to_system_library()?)))
+    {
+        Ok((bindings, raw_bindings)) => {
+            raw::install(raw_bindings);
+            Ok(Pdfium::new(bindings))
+        }
         Err(err) => {
             errors.push(format!("system library: {err:?}"));
             Err(FlattenError::PdfiumNotFound(errors.join("; ")))

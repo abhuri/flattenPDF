@@ -5,11 +5,11 @@ use std::sync::atomic::AtomicBool;
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use flatten_core::{
-    flatten, load_pdfium, to_images, FlattenError, FlattenOptions, ImageOptions, Packaging,
-    Progress, Rotation, Summary,
+    flatten, load_pdfium, to_images, watermark, FlattenError, FlattenOptions, ImageOptions,
+    Packaging, PageSelection, Position, Progress, Rotation, Stamp, Summary, WatermarkOptions,
 };
 
-/// Offline PDF tools: flatten pages to images, or export pages as PNG.
+/// Offline PDF tools: flatten pages to images, export pages as PNG, add watermarks.
 #[derive(Parser)]
 #[command(name = "flattenpdf", version)]
 struct Cli {
@@ -28,6 +28,9 @@ enum Command {
     Flatten(FlattenArgs),
     /// Export pages as PNG images into a folder or a .zip file
     Images(ImagesArgs),
+    /// Stamp a PNG image (e.g. a logo) onto pages. Text watermarks are made
+    /// in the desktop app, which renders the text to an image first.
+    Watermark(WatermarkArgs),
 }
 
 #[derive(Args)]
@@ -93,6 +96,63 @@ struct ImagesArgs {
     threads: usize,
 }
 
+#[derive(Args)]
+struct WatermarkArgs {
+    #[command(flatten)]
+    common: Common,
+
+    /// The watermark picture (PNG; transparency is kept)
+    #[arg(long, required = true)]
+    image: PathBuf,
+
+    /// Width as a percentage of the page width
+    #[arg(long, default_value_t = 50.0)]
+    size: f32,
+
+    /// Counter-clockwise rotation in degrees
+    #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+    angle: f32,
+
+    /// Opacity in percent (0 = invisible, 100 = solid)
+    #[arg(long, default_value_t = 30.0)]
+    opacity: f32,
+
+    /// Where to place it
+    #[arg(long, value_enum, default_value_t = PositionArg::Center)]
+    position: PositionArg,
+
+    /// Only these pages, e.g. "1-3,7"
+    #[arg(long, conflicts_with = "except")]
+    pages: Option<String>,
+
+    /// Every page except these, e.g. "1,10-"
+    #[arg(long)]
+    except: Option<String>,
+
+    /// Flatten afterwards so the watermark cannot be removed
+    #[arg(long)]
+    flatten: bool,
+
+    /// Render resolution when flattening
+    #[arg(long, default_value_t = 200.0, requires = "flatten")]
+    dpi: f32,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum PositionArg {
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Center,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+    /// Repeat across the whole page
+    Tile,
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum RotateArg {
     None,
@@ -146,6 +206,45 @@ fn main() -> Result<()> {
             for_each_input(&args.common, suffix, |input, output, cancel, progress| {
                 to_images(&pdfium, input, output, &opts, cancel, progress)
             })
+        }
+        Command::Watermark(args) => {
+            let png = std::fs::read(&args.image)
+                .with_context(|| format!("cannot read {}", args.image.display()))?;
+            let opts = WatermarkOptions {
+                size: args.size / 100.0,
+                rotation: args.angle,
+                opacity: args.opacity / 100.0,
+                position: match args.position {
+                    PositionArg::TopLeft => Position::TopLeft,
+                    PositionArg::Top => Position::Top,
+                    PositionArg::TopRight => Position::TopRight,
+                    PositionArg::Left => Position::Left,
+                    PositionArg::Center => Position::Center,
+                    PositionArg::Right => Position::Right,
+                    PositionArg::BottomLeft => Position::BottomLeft,
+                    PositionArg::Bottom => Position::Bottom,
+                    PositionArg::BottomRight => Position::BottomRight,
+                    PositionArg::Tile => Position::Tile,
+                },
+                pages: match (args.pages.clone(), args.except.clone()) {
+                    (Some(only), _) => PageSelection::Only(only),
+                    (_, Some(except)) => PageSelection::Except(except),
+                    _ => PageSelection::All,
+                },
+                password: args.common.password.clone(),
+                flatten: args.flatten.then(|| FlattenOptions {
+                    dpi: args.dpi,
+                    ..FlattenOptions::default()
+                }),
+                ..WatermarkOptions::new(Stamp::from_png(&png)?)
+            };
+            for_each_input(
+                &args.common,
+                "_watermarked.pdf",
+                |input, output, cancel, progress| {
+                    watermark(&pdfium, input, output, &opts, cancel, progress)
+                },
+            )
         }
     }
 }

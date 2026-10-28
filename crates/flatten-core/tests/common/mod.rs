@@ -87,6 +87,22 @@ pub fn multi_page_pdf(page_attrs: &str, count: usize) -> Vec<u8> {
     assemble(&objects)
 }
 
+/// A PDF of `count` blank (white) pages with the given geometry.
+pub fn blank_pdf(page_attrs: &str, count: usize) -> Vec<u8> {
+    let kids: Vec<String> = (0..count).map(|i| format!("{} 0 R", 3 + i)).collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {count} >>",
+            kids.join(" ")
+        ),
+    ];
+    for _ in 0..count {
+        objects.push(format!("<< /Type /Page /Parent 2 0 R {page_attrs} >>"));
+    }
+    assemble(&objects)
+}
+
 /// Writes `objects` (1-based) into a PDF with an xref table and trailer.
 fn assemble(objects: &[String]) -> Vec<u8> {
     let mut pdf = b"%PDF-1.7\n".to_vec();
