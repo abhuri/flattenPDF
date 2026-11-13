@@ -5,11 +5,13 @@ use std::sync::atomic::AtomicBool;
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use flatten_core::{
-    flatten, load_pdfium, to_images, watermark, FlattenError, FlattenOptions, ImageOptions,
-    Packaging, PageSelection, Position, Progress, Rotation, Stamp, Summary, WatermarkOptions,
+    combine, flatten, load_pdfium, to_images, watermark, CombineInput, CombineOptions,
+    FlattenError, FlattenOptions, ImageOptions, ImagePageSize, Packaging, PageSelection, Position,
+    Progress, Rotation, Stamp, Summary, WatermarkOptions,
 };
 
-/// Offline PDF tools: flatten pages to images, export pages as PNG, add watermarks.
+/// Offline PDF tools: flatten pages to images, export pages as PNG, add
+/// watermarks, combine PDFs and pictures.
 #[derive(Parser)]
 #[command(name = "flattenpdf", version)]
 struct Cli {
@@ -31,6 +33,54 @@ enum Command {
     /// Stamp a PNG image (e.g. a logo) onto pages. Text watermarks are made
     /// in the desktop app, which renders the text to an image first.
     Watermark(WatermarkArgs),
+    /// Join PDFs and pictures (JPG, PNG, GIF, WebP, BMP, TIFF), in the order
+    /// given, into one PDF
+    Combine(CombineArgs),
+}
+
+#[derive(Args)]
+struct CombineArgs {
+    /// PDFs and pictures, in the order their pages should appear
+    #[arg(required = true)]
+    inputs: Vec<PathBuf>,
+
+    /// Output path. Default: <first input>_combined.pdf
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// Password for the encrypted input PDFs
+    #[arg(long)]
+    password: Option<String>,
+
+    /// Page size for pictures
+    #[arg(long, value_enum, default_value_t = PageSizeArg::A4)]
+    page_size: PageSizeArg,
+
+    /// Flatten the result
+    #[arg(long)]
+    flatten: bool,
+
+    /// Render resolution when flattening
+    #[arg(long, default_value_t = 200.0, requires = "flatten")]
+    dpi: f32,
+
+    /// JPEG quality when flattening (1-100)
+    #[arg(short, long, default_value_t = 85, requires = "flatten")]
+    quality: u8,
+
+    /// Grayscale when flattening
+    #[arg(long, requires = "flatten")]
+    gray: bool,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum PageSizeArg {
+    /// A4, turned to match each picture
+    A4,
+    /// US Letter, turned to match each picture
+    Letter,
+    /// The picture's own size at 96 pixels per inch
+    Fit,
 }
 
 #[derive(Args)]
@@ -245,6 +295,54 @@ fn main() -> Result<()> {
                     watermark(&pdfium, input, output, &opts, cancel, progress)
                 },
             )
+        }
+        Command::Combine(args) => {
+            let inputs: Vec<CombineInput> = args
+                .inputs
+                .iter()
+                .map(|path| CombineInput::from_path(path, args.password.clone()))
+                .collect();
+            let opts = CombineOptions {
+                image_page_size: match args.page_size {
+                    PageSizeArg::A4 => ImagePageSize::A4,
+                    PageSizeArg::Letter => ImagePageSize::Letter,
+                    PageSizeArg::Fit => ImagePageSize::Fit,
+                },
+                flatten: args.flatten.then(|| FlattenOptions {
+                    dpi: args.dpi,
+                    jpeg_quality: args.quality,
+                    grayscale: args.gray,
+                    ..FlattenOptions::default()
+                }),
+            };
+            let output = args
+                .output
+                .clone()
+                .unwrap_or_else(|| default_output(&args.inputs[0], "_combined.pdf"));
+            eprintln!("{} files -> {}", inputs.len(), output.display());
+            let progress = |p: Progress| match p {
+                Progress::Started { total_pages } => eprint!("  {total_pages} steps"),
+                Progress::PageDone { done, total_pages } => {
+                    eprint!("\r  {done}/{total_pages}");
+                    let _ = std::io::stderr().flush();
+                }
+            };
+            let summary = combine(
+                &pdfium,
+                &inputs,
+                &output,
+                &opts,
+                &AtomicBool::new(false),
+                &progress,
+            )
+            .context("failed to combine")?;
+            eprintln!(
+                "\r  done: {} pages, {:.1} MB, {:.1}s",
+                summary.pages,
+                summary.output_bytes as f64 / 1_048_576.0,
+                summary.elapsed.as_secs_f64()
+            );
+            Ok(())
         }
     }
 }

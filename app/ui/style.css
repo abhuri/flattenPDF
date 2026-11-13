@@ -280,6 +280,44 @@ input[type="color"] {
   .wm-preview { position: static; }
 }
 
+/* ---------- combine tab ---------- */
+.files li.orderable { grid-template-columns: auto 1fr auto; padding-left: 6px; }
+.files li.orderable .password { grid-column: 2 / -1; }
+.handle {
+  grid-row: span 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+}
+.handle:hover { background: var(--bg); color: var(--text); }
+.handle .grip { font-size: 16px; line-height: 1; }
+.order-no { min-width: 1.6em; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.files li.dragging { background: var(--accent-soft); box-shadow: 0 4px 14px rgba(0,0,0,.18); position: relative; z-index: 1; }
+body.reordering, body.reordering * { cursor: grabbing !important; }
+button.icon.move { font-size: 11px; padding: 4px 6px; }
+button.icon.move:hover { color: var(--accent); }
+.tag.kind { color: var(--accent); }
+.tag.kind.image { color: var(--ok); }
+
+.result {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.result-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.result-head .file-name { flex: 1; min-width: 0; }
+.note.error { color: var(--danger); user-select: text; }
+#cb-name { flex: 1; min-width: 0; }
+
 .bar.indeterminate > div { animation: slide 1.1s ease-in-out infinite; }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 @media (prefers-reduced-motion: reduce) { .bar.indeterminate > div { animation: none; width: 100% !important; opacity: .5; } }
@@ -296,6 +334,12 @@ input[type="color"] {
   border-radius: 8px;
   max-width: 90%;
   box-shadow: 0 4px 16px rgba(0,0,0,.2);
+}
+
+/* Four tabs with labels need about 800 px: narrower windows show only the
+   icon of the inactive tabs (their names are in the tooltip). */
+@media (max-width: 880px) {
+  .tabs button:not(.active) .tab-label { display: none; }
 }
 
 @media (max-width: 720px) {

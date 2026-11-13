@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use flatten_core::{
-    flatten, load_pdfium, to_images, watermark, watermark_preview, FlattenError, FlattenOptions,
-    ImageOptions, Packaging, PageSelection, Pdfium, Position, Progress, Rotation, Stamp, Summary,
+    combine, flatten, is_image_path, load_pdfium, picture_size, to_images, watermark,
+    watermark_preview, CombineInput, CombineOptions, FlattenError, FlattenOptions, ImageOptions,
+    ImagePageSize, Packaging, PageSelection, Pdfium, Position, Progress, Rotation, Stamp, Summary,
     WatermarkOptions,
 };
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,8 @@ struct FileInfo {
     path: String,
     name: String,
     size_bytes: u64,
+    /// "pdf" or "image".
+    kind: &'static str,
     /// Unknown until the file can be opened (wrong password or broken file).
     pages: Option<u32>,
     /// True when a password is needed to open the file.
@@ -160,6 +163,70 @@ impl WatermarkSettings {
     }
 }
 
+/// Combine settings as the UI sends them.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CombineSettings {
+    /// Output file name without ".pdf"; empty means "<first file>_combined".
+    name: String,
+    page_size: PageSizeArg,
+    flatten: bool,
+    dpi: f32,
+    quality: u8,
+    grayscale: bool,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum PageSizeArg {
+    A4,
+    Letter,
+    Fit,
+}
+
+impl CombineSettings {
+    fn options(&self) -> CombineOptions {
+        CombineOptions {
+            image_page_size: match self.page_size {
+                PageSizeArg::A4 => ImagePageSize::A4,
+                PageSizeArg::Letter => ImagePageSize::Letter,
+                PageSizeArg::Fit => ImagePageSize::Fit,
+            },
+            flatten: self.flatten.then(|| FlattenOptions {
+                dpi: self.dpi,
+                jpeg_quality: self.quality,
+                grayscale: self.grayscale,
+                ..FlattenOptions::default()
+            }),
+        }
+    }
+
+    /// The output name: what the user typed, made safe for file names on
+    /// every OS, or "<first file>_combined".
+    fn file_stem(&self, first_input: &Path) -> String {
+        let typed = self.name.trim();
+        let typed = typed
+            .strip_suffix(".pdf")
+            .or_else(|| typed.strip_suffix(".PDF"))
+            .unwrap_or(typed);
+        let safe: String = typed
+            .chars()
+            .filter(|c| !matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+            .filter(|c| !c.is_control())
+            .collect();
+        let safe = safe.trim().trim_end_matches('.');
+        if safe.is_empty() {
+            let stem = first_input
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy();
+            format!("{stem}_combined")
+        } else {
+            safe.to_string()
+        }
+    }
+}
+
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum RotationArg {
@@ -203,6 +270,9 @@ enum JobEvent {
         id: u32,
         message: String,
         password_required: bool,
+        /// The input at fault, when a combine fails because of one file.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
     },
     Cancelled {
         id: u32,
@@ -227,6 +297,7 @@ async fn inspect(app: AppHandle, paths: Vec<String>) -> Result<Vec<FileInfo>, St
 
 fn inspect_one(pdfium: &Pdfium, path: String) -> FileInfo {
     let p = PathBuf::from(&path);
+    let image = is_image_path(&p);
     let mut info = FileInfo {
         name: p
             .file_name()
@@ -235,10 +306,18 @@ fn inspect_one(pdfium: &Pdfium, path: String) -> FileInfo {
             .into_owned(),
         size_bytes: std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0),
         path,
+        kind: if image { "image" } else { "pdf" },
         pages: None,
         locked: false,
         error: None,
     };
+    if image {
+        match picture_size(&p) {
+            Ok(_) => info.pages = Some(1),
+            Err(err) => info.error = Some(err.to_string()),
+        }
+        return info;
+    }
     match pdfium.load_pdf_from_file(&p, None) {
         Ok(doc) => info.pages = Some(doc.pages().len() as u32),
         Err(err) => match FlattenError::from(err) {
@@ -295,6 +374,7 @@ fn start(
                     id: job.id,
                     message: err.to_string(),
                     password_required: false,
+                    file: None,
                 }),
             }
         }
@@ -376,6 +456,10 @@ fn run_job(
         }
     };
 
+    emit_result(id, result, emit);
+}
+
+fn emit_result(id: u32, result: Result<Summary, FlattenError>, emit: &(dyn Fn(JobEvent) + Sync)) {
     match result {
         Ok(summary) => emit(JobEvent::Finished {
             id,
@@ -387,24 +471,97 @@ fn run_job(
         Err(FlattenError::Cancelled) => emit(JobEvent::Cancelled { id }),
         Err(err) => emit(JobEvent::Failed {
             id,
-            password_required: matches!(err, FlattenError::PasswordRequired),
+            password_required: matches!(err.root(), FlattenError::PasswordRequired),
+            file: match &err {
+                FlattenError::InFile { file, .. } => Some(file.to_string_lossy().into_owned()),
+                _ => None,
+            },
             message: err.to_string(),
         }),
+    }
+}
+
+/// Combines `files`, in order, into one PDF on a background thread.
+/// Progress is reported through `job-event` events carrying `id`.
+#[tauri::command]
+fn start_combine(
+    app: AppHandle,
+    state: State<AppState>,
+    id: u32,
+    files: Vec<Job>,
+    settings: CombineSettings,
+    output_dir: Option<String>,
+) -> Result<(), String> {
+    state.pdfium()?;
+    let first = PathBuf::from(&files.first().ok_or("no files to combine")?.input);
+    if state.busy.swap(true, Ordering::SeqCst) {
+        return Err("already running".into());
+    }
+    state.cancel.store(false, Ordering::SeqCst);
+
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let pdfium = state.pdfium().expect("checked above");
+        let emit = |event: JobEvent| {
+            let _ = app.emit("job-event", event);
+        };
+        let inputs: Vec<CombineInput> = files
+            .into_iter()
+            .map(|job| CombineInput::from_path(job.input, job.password))
+            .collect();
+        let output = unique_path(
+            &output_folder(&first, output_dir.as_deref()),
+            &settings.file_stem(&first),
+            ".pdf",
+        );
+        let on_progress = |p: Progress| match p {
+            Progress::Started { total_pages } => emit(JobEvent::Started { id, total_pages }),
+            Progress::PageDone { done, total_pages } => emit(JobEvent::Progress {
+                id,
+                done,
+                total_pages,
+            }),
+        };
+        let result = combine(
+            pdfium,
+            &inputs,
+            &output,
+            &settings.options(),
+            &state.cancel,
+            &on_progress,
+        );
+        emit_result(id, result, &emit);
+        state.busy.store(false, Ordering::SeqCst);
+        emit(JobEvent::BatchFinished);
+    });
+    Ok(())
+}
+
+/// `output_dir` if one was chosen, otherwise the input's folder.
+fn output_folder(input: &Path, output_dir: Option<&str>) -> PathBuf {
+    match output_dir {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => input.parent().map(Path::to_path_buf).unwrap_or_default(),
     }
 }
 
 /// `<dir>/<stem><suffix><extension>`, adding " (2)", " (3)"... rather than
 /// overwriting. `dir` defaults to the input's folder.
 fn output_path(input: &Path, output_dir: Option<&str>, suffix: &str, extension: &str) -> PathBuf {
-    let dir = match output_dir {
-        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
-        _ => input.parent().map(Path::to_path_buf).unwrap_or_default(),
-    };
     let stem = input.file_stem().unwrap_or_default().to_string_lossy();
-    let mut candidate = dir.join(format!("{stem}{suffix}{extension}"));
+    unique_path(
+        &output_folder(input, output_dir),
+        &format!("{stem}{suffix}"),
+        extension,
+    )
+}
+
+/// `<dir>/<name><extension>`, or `<dir>/<name> (2)<extension>`... if taken.
+fn unique_path(dir: &Path, name: &str, extension: &str) -> PathBuf {
+    let mut candidate = dir.join(format!("{name}{extension}"));
     let mut n = 2;
     while candidate.exists() {
-        candidate = dir.join(format!("{stem}{suffix} ({n}){extension}"));
+        candidate = dir.join(format!("{name} ({n}){extension}"));
         n += 1;
     }
     candidate
@@ -526,6 +683,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             inspect,
             start,
+            start_combine,
             cancel,
             preview,
             read_image,
@@ -573,5 +731,33 @@ mod tests {
         assert_eq!(opts.pages, PageSelection::Except("1, 10-".into()));
         assert!((opts.opacity - 0.25).abs() < 1e-6 && (opts.size - 0.6).abs() < 1e-6);
         assert_eq!(opts.flatten.map(|f| f.dpi), Some(200.0));
+    }
+
+    /// The JSON shape sent by ui/combine.js (`settings` of `start_combine`).
+    #[test]
+    fn combine_settings_from_the_ui_parse() {
+        let settings: CombineSettings = serde_json::from_value(serde_json::json!({
+            "name": " report: v2.pdf ",
+            "pageSize": "letter",
+            "flatten": true,
+            "dpi": 150,
+            "quality": 80,
+            "grayscale": true
+        }))
+        .unwrap();
+        let opts = settings.options();
+        assert_eq!(opts.image_page_size, ImagePageSize::Letter);
+        let flatten = opts.flatten.unwrap();
+        assert!(flatten.grayscale && flatten.jpeg_quality == 80 && flatten.dpi == 150.0);
+        assert_eq!(settings.file_stem(Path::new("a/first.pdf")), "report v2");
+
+        let unnamed = CombineSettings {
+            name: "  ".into(),
+            ..settings
+        };
+        assert_eq!(
+            unnamed.file_stem(Path::new("a/first.jpg")),
+            "first_combined"
+        );
     }
 }

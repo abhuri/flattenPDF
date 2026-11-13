@@ -1,12 +1,13 @@
 # FlattenPDF
 
-Offline PDF tools for Windows, Linux and macOS, in one app with three tabs:
+Offline PDF tools for Windows, Linux and macOS, in one app with four tabs:
 
 | Tab | What it does | Output |
 |---|---|---|
 | 🔒 **Flatten** | Converts every page into an image and writes a new PDF that contains only those images | `<name>_flattened.pdf` |
 | 🖼️ **To Images** | Saves pages as PNG images, optionally rotated, into a folder or a single .zip | `<name>_images/page-001.png …` or `<name>_images.zip` |
 | 💧 **Watermark** | Stamps text or a picture onto all, some, or all-but-some pages, optionally flattening the result | `<name>_watermarked.pdf` |
+| 📚 **Combine** | Joins PDFs and pictures (JPG, PNG, GIF, WebP, BMP, TIFF), in the order you set, into one PDF, optionally flattening it | `<first file>_combined.pdf` or a name you choose |
 
 A flattened PDF looks the same, but:
 
@@ -56,6 +57,22 @@ complex scripts render correctly. The stamp is stored once in the PDF and
 reused on every page, so even a tiled watermark on hundreds of pages adds very
 little to the file size.
 
+### Combine
+
+- Add **PDFs and pictures** (JPG, PNG, GIF, WebP, BMP, TIFF) in any mix
+- Set the **order** by dragging ⠿, with ▲ ▼, or with *A→Z by name* (`2` before
+  `10`) and *Reverse*
+- **Page size for pictures**: A4 or Letter (turned to match the picture,
+  which is fitted inside), or the picture's own size at 96 pixels per inch
+- **Flatten the result** turns every page into an image, using the Flatten
+  tab's resolution, quality and grayscale settings
+
+PDF pages are copied unchanged (text stays selectable unless you flatten).
+JPEG photos are embedded byte for byte, so they lose no quality, and phone
+photos appear upright (EXIF orientation is honoured). Other picture formats are
+stored losslessly; GIF and TIFF use their first frame. Office documents
+(Word, Excel…) are not supported: save them as PDF first.
+
 ## Usage (CLI)
 
 ```bash
@@ -66,6 +83,8 @@ flattenpdf images input.pdf --rotate right           # -> input_images/page-001.
 flattenpdf images input.pdf --zip --pages 1-3,7      # -> input_images.zip
 flattenpdf watermark input.pdf --image logo.png --position bottom-right --size 15 --opacity 60
 flattenpdf watermark *.pdf --image stamp.png --position tile --angle 45 --except 1 --flatten
+flattenpdf combine cover.pdf photo.jpg scan.tiff report.pdf -o all.pdf
+flattenpdf combine *.jpg --page-size fit --flatten     # -> <first>_combined.pdf
 ```
 
 Text watermarks are made in the desktop app; on the command line, render the
@@ -73,7 +92,7 @@ text to a PNG first.
 
 | Command | Option | Default | |
 |---|---|---|---|
-| all | `-o, --output` | next to input | output path (single input only) |
+| all | `-o, --output` | next to input | output path (single input only, except combine) |
 | all | `--password` | | password for encrypted input |
 | all | `--pdfium-dir` | next to exe | where the PDFium library lives |
 | flatten | `--dpi` | 200 | render resolution (36–600) |
@@ -91,6 +110,8 @@ text to a PNG first.
 | watermark | `--position` | center | `top-left`, `top`, `top-right`, `left`, `center`, `right`, `bottom-left`, `bottom`, `bottom-right`, `tile` |
 | watermark | `--pages` / `--except` | all | e.g. `1-3,7` / `1,10-` |
 | watermark | `--flatten` | off | flatten afterwards (`--dpi` sets the resolution) |
+| combine | `--page-size` | a4 | page for pictures: `a4`, `letter`, `fit` (picture size at 96 px/inch) |
+| combine | `--flatten` | off | flatten the result (with `--dpi`, `-q, --quality`, `--gray`) |
 
 The PDFium library (`pdfium.dll` / `libpdfium.so` / `libpdfium.dylib`) must sit
 next to the executable; release archives already include it.
@@ -118,9 +139,10 @@ encoded and streamed to disk one at a time (peak RAM 92 MB when flattening at
 [PDFium render, 1 thread] --bitmaps--> [JPEG/PNG encoders, N threads] --> [in-order writer, streaming]
 ```
 
-- `crates/flatten-core` – the shared render pipeline, flatten, images and
-  watermark, and a minimal image-only PDF writer. Watermarks use a few PDFium
-  calls directly (`raw.rs`) to share one form XObject across all pages.
+- `crates/flatten-core` – the shared render pipeline, flatten, images,
+  watermark and combine, and a minimal image-only PDF writer. Watermark and
+  combine use a few PDFium calls directly (`raw.rs`) to share one form XObject
+  across all pages, copy pages and embed JPEGs as they are.
 - `crates/flatten-cli` – the `flattenpdf` command
 - `app/` – the Tauri 2 desktop app (`src-tauri/` backend, `ui/` plain HTML/JS front end)
 
@@ -166,5 +188,6 @@ Windows, Linux and macOS and attaches them to a GitHub Release.
 - [x] Installers (.exe / .msi / .dmg / .deb / .rpm / .AppImage)
 - [x] Export pages as PNG (folder or zip, rotation, page ranges)
 - [x] Watermarks (text or picture, profiles, live preview)
+- [x] Combine PDFs and pictures into one PDF
 - [ ] Output password
 - [ ] Code signing (Windows, macOS notarization)

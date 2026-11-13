@@ -13,6 +13,7 @@ crossbeam-channel.workspace = true
 thiserror.workspace = true
 png = "0.18.1"
 zip = { version = "9.1.2", default-features = false }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff"] }
 
 [dev-dependencies]
 jpeg-decoder = { version = "0.3.2", default-features = false }

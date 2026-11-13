@@ -1,5 +1,6 @@
-//! Direct PDFium calls for the few things `pdfium-render` does not expose,
-//! mainly sharing one form XObject across many pages when stamping.
+//! Direct PDFium calls for the few things `pdfium-render` does not expose:
+//! sharing one form XObject across many pages when stamping, and building a
+//! combined document from other PDFs and pictures.
 //!
 //! [`crate::load_pdfium`] binds the library twice: once for `pdfium-render`
 //! and once for these raw bindings. Both go through `pdfium-render`'s
@@ -96,6 +97,35 @@ impl RawDocument {
 
     pub(crate) fn page_count(&self) -> usize {
         unsafe { self.raw.FPDF_GetPageCount(self.handle).max(0) as usize }
+    }
+
+    /// Copies every page of `source` to the end of this document.
+    pub(crate) fn import_all(&self, source: &RawDocument) -> Result<(), FlattenError> {
+        let at = self.page_count() as c_int;
+        // A null index list means "all pages".
+        let ok = unsafe {
+            self.raw
+                .FPDF_ImportPagesByIndex(self.handle, source.handle, std::ptr::null(), 0, at)
+        };
+        if self.raw.is_true(ok) {
+            Ok(())
+        } else {
+            Err(FlattenError::PdfiumFailed("copy the pages"))
+        }
+    }
+
+    /// Adds an empty page of `width` x `height` points at the end.
+    pub(crate) fn new_page(&self, width: f64, height: f64) -> Result<RawPage<'_>, FlattenError> {
+        let at = self.page_count() as c_int;
+        let handle = unsafe { self.raw.FPDFPage_New(self.handle, at, width, height) };
+        if handle.is_null() {
+            return Err(FlattenError::PdfiumFailed("create a page"));
+        }
+        Ok(RawPage {
+            raw: self.raw,
+            handle,
+            _doc: std::marker::PhantomData,
+        })
     }
 
     /// Copies page `index` (0-based) of `source` to the end of this document.
@@ -202,7 +232,7 @@ impl RawPage<'_> {
             Ok(())
         } else {
             unsafe { self.raw.FPDFPageObj_Destroy(object) };
-            Err(FlattenError::PdfiumFailed("add the watermark to a page"))
+            Err(FlattenError::PdfiumFailed("add an object to a page"))
         }
     }
 
@@ -221,6 +251,31 @@ impl RawPage<'_> {
 impl Drop for RawPage<'_> {
     fn drop(&mut self) {
         unsafe { self.raw.FPDF_ClosePage(self.handle) };
+    }
+}
+
+/// JPEG bytes handed to PDFium through an FPDF_FILEACCESS.
+#[repr(C)]
+pub(crate) struct MemoryAccess {
+    pub(crate) base: FPDF_FILEACCESS,
+    data: Vec<u8>,
+}
+
+impl MemoryAccess {
+    /// Boxed so the address PDFium keeps in `m_Param` stays valid.
+    pub(crate) fn new(data: Vec<u8>) -> Result<Box<Self>, FlattenError> {
+        let len = c_ulong::try_from(data.len())
+            .map_err(|_| FlattenError::InvalidOptions("picture is too large (over 4 GB)".into()))?;
+        let mut access = Box::new(Self {
+            base: FPDF_FILEACCESS {
+                m_FileLen: len,
+                m_GetBlock: Some(read_memory_block),
+                m_Param: std::ptr::null_mut(),
+            },
+            data,
+        });
+        access.base.m_Param = &mut *access as *mut MemoryAccess as *mut c_void;
+        Ok(access)
     }
 }
 
@@ -244,6 +299,23 @@ unsafe extern "C" fn read_block(
     let ok = access.file.seek(SeekFrom::Start(position as u64)).is_ok()
         && access.file.read_exact(buf).is_ok();
     ok as c_int
+}
+
+unsafe extern "C" fn read_memory_block(
+    param: *mut c_void,
+    position: c_ulong,
+    buf: *mut c_uchar,
+    size: c_ulong,
+) -> c_int {
+    let access = &*(param as *const MemoryAccess);
+    let (start, size) = (position as usize, size as usize);
+    match access.data.get(start..start.saturating_add(size)) {
+        Some(chunk) => {
+            std::ptr::copy_nonoverlapping(chunk.as_ptr(), buf, size);
+            1
+        }
+        None => 0,
+    }
 }
 
 unsafe extern "C" fn write_block<W: Write>(

@@ -13,9 +13,10 @@
       <h1>FlattenPDF</h1>
     </div>
     <nav class="tabs" id="tabs" role="tablist">
-      <button type="button" role="tab" data-tab="flatten"><span aria-hidden="true">🔒</span> <span data-i18n="tabFlatten"></span></button>
-      <button type="button" role="tab" data-tab="images"><span aria-hidden="true">🖼️</span> <span data-i18n="tabImages"></span></button>
-      <button type="button" role="tab" data-tab="watermark"><span aria-hidden="true">💧</span> <span data-i18n="tabWatermark"></span></button>
+      <button type="button" role="tab" data-tab="flatten"><span aria-hidden="true">🔒</span> <span class="tab-label" data-i18n="tabFlatten"></span></button>
+      <button type="button" role="tab" data-tab="images"><span aria-hidden="true">🖼️</span> <span class="tab-label" data-i18n="tabImages"></span></button>
+      <button type="button" role="tab" data-tab="watermark"><span aria-hidden="true">💧</span> <span class="tab-label" data-i18n="tabWatermark"></span></button>
+      <button type="button" role="tab" data-tab="combine"><span aria-hidden="true">📚</span> <span class="tab-label" data-i18n="tabCombine"></span></button>
     </nav>
     <div class="header-toggles">
       <button id="theme-toggle" class="toggle" type="button" role="switch">
@@ -38,6 +39,16 @@
     </section>
 
     <ul id="files" class="files" hidden></ul>
+
+    <section id="cb-result" class="result" data-panel="combine" aria-live="polite">
+      <div class="result-head">
+        <span id="cb-result-status" class="status"></span>
+        <span id="cb-result-name" class="file-name"></span>
+        <button id="cb-result-show" type="button" class="link" data-i18n="showInFolder"></button>
+      </div>
+      <div id="cb-result-bar" class="bar"><div></div></div>
+      <span id="cb-result-error" class="note error"></span>
+    </section>
 
     <section class="settings" data-panel="flatten">
       <div class="field">
@@ -208,6 +219,35 @@
       </div>
     </section>
 
+    <section class="settings" data-panel="combine">
+      <div class="field">
+        <label class="label" for="cb-name" data-i18n="outputName"></label>
+        <div class="row">
+          <input id="cb-name" type="text" spellcheck="false">
+          <span class="muted">.pdf</span>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label" data-i18n="imagePage"></span>
+        <div class="segmented" data-setting="combine.pageSize">
+          <button type="button" data-value="a4">A4</button>
+          <button type="button" data-value="letter">Letter</button>
+          <button type="button" data-value="fit" data-i18n="pageFit"></button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label" data-i18n="order"></span>
+        <div class="row wrap">
+          <button id="cb-sort" type="button" class="ghost small" data-i18n="sortByName"></button>
+          <button id="cb-reverse" type="button" class="ghost small" data-i18n="reverseOrder"></button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="switch"><input id="cb-flatten" type="checkbox"><span data-i18n="flattenCombined"></span></label>
+        <span class="note" data-i18n="flattenCombinedNote"></span>
+      </div>
+    </section>
+
     <section class="settings">
       <div class="field full">
         <span class="label" data-i18n="saveTo"></span>
@@ -233,5 +273,6 @@
 
   <script src="main.js"></script>
   <script src="watermark.js"></script>
+  <script src="combine.js"></script>
 </body>
 </html>

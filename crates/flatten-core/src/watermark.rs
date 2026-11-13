@@ -461,15 +461,15 @@ pub(crate) struct Affine {
 }
 
 impl Affine {
-    const fn new(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> Self {
+    pub(crate) const fn new(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> Self {
         Self { a, b, c, d, e, f }
     }
 
-    fn scale(x: f64, y: f64) -> Self {
+    pub(crate) fn scale(x: f64, y: f64) -> Self {
         Self::new(x, 0.0, 0.0, y, 0.0, 0.0)
     }
 
-    fn translate(x: f64, y: f64) -> Self {
+    pub(crate) fn translate(x: f64, y: f64) -> Self {
         Self::new(1.0, 0.0, 0.0, 1.0, x, y)
     }
 
@@ -480,7 +480,7 @@ impl Affine {
     }
 
     /// Applies `self`, then `outer`.
-    fn then(&self, outer: &Affine) -> Affine {
+    pub(crate) fn then(&self, outer: &Affine) -> Affine {
         Affine::new(
             outer.a * self.a + outer.c * self.b,
             outer.b * self.a + outer.d * self.b,
@@ -492,7 +492,7 @@ impl Affine {
     }
 
     #[cfg(test)]
-    fn apply(&self, x: f64, y: f64) -> (f64, f64) {
+    pub(crate) fn apply(&self, x: f64, y: f64) -> (f64, f64) {
         (
             self.a * x + self.c * y + self.e,
             self.b * x + self.d * y + self.f,

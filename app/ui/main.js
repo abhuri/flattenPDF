@@ -115,14 +115,19 @@ const STRINGS = {
   },
 };
 
-const TABS = ["flatten", "images", "watermark"];
-const START_LABEL = { flatten: "startFlatten", images: "startImages", watermark: "startWatermark" };
-const HINT = { flatten: "hintFlatten", images: "hintImages", watermark: "hintWatermark" };
+const TABS = ["flatten", "images", "watermark", "combine"];
+const START_LABEL = { flatten: "startFlatten", images: "startImages", watermark: "startWatermark", combine: "startCombine" };
+const HINT = { flatten: "hintFlatten", images: "hintImages", watermark: "hintWatermark", combine: "hintCombine" };
 
 /**
- * Extra behaviour for a tab, registered by its own script (watermark.js):
- * render() refreshes its panel, validate() returns a problem to show or null,
- * task() resolves to the settings sent to the backend.
+ * Extra behaviour for a tab, registered by its own script (watermark.js,
+ * combine.js), all optional:
+ * - render() refreshes its panel; validate() returns a problem to show or null
+ * - task() resolves to the settings sent to the backend
+ * - extensions: file types the tab accepts (default ["pdf"])
+ * - start() replaces the usual per-file run; canStart() enables the button
+ * - onJobEvent(event) returns true when it handled the event
+ * - decorateRow(li, file, index) adds to a file's row in the list
  */
 const tabHooks = {};
 
@@ -130,6 +135,7 @@ const DEFAULT_SETTINGS = {
   outputDir: null,
   flatten: { dpi: 200, quality: 85, grayscale: false, suffix: "_flattened" },
   images: { dpi: 200, rotation: "none", packaging: "folder", pages: "" },
+  combine: { name: "", pageSize: "a4", flatten: false },
 };
 
 const store = {
@@ -163,7 +169,7 @@ const state = {
   theme: ["light", "dark"].includes(store.get("theme", null)) ? store.get("theme", null) : null,
   tab: TABS.includes(store.get("tab", "flatten")) ? store.get("tab", "flatten") : "flatten",
   settings: loadSettings(),
-  files: { flatten: [], images: [], watermark: [] },
+  files: { flatten: [], images: [], watermark: [], combine: [] },
   nextId: 1,
   running: false,
 };
@@ -211,13 +217,17 @@ function initialStatus(info) {
   return "ready";
 }
 
+const acceptedExtensions = (tab) => tabHooks[tab]?.extensions ?? ["pdf"];
+
 async function addPaths(paths) {
   const tab = state.tab;
   const list = state.files[tab];
-  const pdfs = paths.filter((p) => p.toLowerCase().endsWith(".pdf"));
+  const extensions = acceptedExtensions(tab);
+  const accepted = paths.filter((p) => extensions.includes(p.split(".").pop().toLowerCase()));
   const known = new Set(list.map((f) => f.path));
-  const fresh = pdfs.filter((p) => !known.has(p));
-  if (pdfs.length < paths.length) toast(t("notPdf", paths.length - pdfs.length));
+  const fresh = accepted.filter((p) => !known.has(p));
+  const skipped = paths.length - accepted.length;
+  if (skipped) toast(t(extensions.length > 1 ? "notSupported" : "notPdf", skipped));
   if (!fresh.length) return;
 
   let infos;
@@ -250,6 +260,7 @@ async function taskFor(tab) {
 }
 
 async function start() {
+  if (tabHooks[state.tab]?.start) return tabHooks[state.tab].start();
   const files = currentFiles().filter(runnable);
   if (!files.length) {
     toast(t("nothingToDo"));
@@ -289,6 +300,7 @@ function findFile(id) {
 }
 
 function onJobEvent(event) {
+  for (const hooks of Object.values(tabHooks)) if (hooks.onJobEvent?.(event)) return render();
   if (event.kind === "batchFinished") {
     state.running = false;
     const finished = TABS.flatMap((tab) => state.files[tab]).filter((f) => f.justFinished);
@@ -335,7 +347,7 @@ function statusText(file) {
   }
 }
 
-function fileRow(file) {
+function fileRow(file, index) {
   const meta = el("div", { className: "file-meta" });
   if (file.locked) meta.append(el("span", { className: "tag", textContent: t("tagLocked") }));
   if (file.pages != null) meta.append(el("span", { textContent: t("pages", file.pages) }));
@@ -388,6 +400,7 @@ function fileRow(file) {
     fill.style.width = indeterminate ? "40%" : file.total ? `${(100 * file.done) / file.total}%` : "0";
     li.append(el("div", { className: `bar${indeterminate ? " indeterminate" : ""}` }, fill));
   }
+  tabHooks[state.tab]?.decorateRow?.(li, file, index);
   return li;
 }
 
@@ -405,6 +418,10 @@ function render() {
     const active = btn.dataset.tab === state.tab;
     btn.classList.toggle("active", active);
     btn.setAttribute("aria-selected", String(active));
+    // Narrow windows show only the icon of inactive tabs (style.css).
+    const label = btn.querySelector(".tab-label").textContent;
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
     btn.disabled = state.running && !active;
   }
   for (const panel of document.querySelectorAll("[data-panel]")) panel.hidden = panel.dataset.panel !== state.tab;
@@ -439,7 +456,8 @@ function render() {
   for (const id of ["add", "clear", "choose-dir", "reset-dir", "quality", "gray", "pages"]) $(id).disabled = busy;
   for (const input of document.querySelectorAll("[data-suffix]")) input.disabled = busy;
   $("start").hidden = busy;
-  $("start").disabled = !files.some(runnable);
+  const canStart = tabHooks[state.tab]?.canStart;
+  $("start").disabled = canStart ? !canStart() : !files.some(runnable);
   $("cancel").hidden = !busy;
   tabHooks[state.tab]?.render?.();
 }
@@ -484,7 +502,9 @@ for (const btn of $("tabs").children) {
 }
 
 $("add").onclick = async () => {
-  const picked = await open({ multiple: true, filters: [{ name: "PDF", extensions: ["pdf", "PDF"] }] });
+  const extensions = acceptedExtensions(state.tab).flatMap((e) => [e, e.toUpperCase()]);
+  const name = extensions.length > 2 ? t("supportedFiles") : "PDF";
+  const picked = await open({ multiple: true, filters: [{ name, extensions }] });
   if (picked) await addPaths(Array.isArray(picked) ? picked : [picked]);
 };
 

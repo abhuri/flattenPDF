@@ -3,10 +3,12 @@
 //! - [`flatten`]: render every page to an image and write an image-only PDF
 //! - [`to_images`]: export pages as PNG files into a folder or a ZIP archive
 //! - [`watermark`]: stamp an image or rasterized text onto selected pages
+//! - [`combine`]: join PDFs and pictures, in order, into one PDF
 //!
 //! Rendering runs through one bounded pipeline (see `pipeline.rs`), so memory
 //! stays flat no matter how many pages a document has.
 
+mod combine;
 mod flatten;
 mod images;
 mod pdf_writer;
@@ -20,6 +22,10 @@ use std::time::Duration;
 
 use pdfium_render::prelude::*;
 
+pub use combine::{
+    combine, is_image_path, picture_size, CombineInput, CombineOptions, ImagePageSize,
+    IMAGE_EXTENSIONS,
+};
 pub use flatten::{flatten, FlattenOptions};
 pub use images::{parse_page_ranges, to_images, ImageOptions, Packaging, Rotation};
 pub use pdf_writer::{ColorSpace, ImagePage, ImagePdfWriter};
@@ -62,6 +68,22 @@ pub enum FlattenError {
     InvalidOptions(String),
     #[error("cancelled")]
     Cancelled,
+    /// A problem with one of several input files.
+    #[error("{}: {error}", file.file_name().unwrap_or_default().to_string_lossy())]
+    InFile {
+        file: PathBuf,
+        error: Box<FlattenError>,
+    },
+}
+
+impl FlattenError {
+    /// The error itself, or the one inside [`FlattenError::InFile`].
+    pub fn root(&self) -> &FlattenError {
+        match self {
+            FlattenError::InFile { error, .. } => error.root(),
+            other => other,
+        }
+    }
 }
 
 impl From<PdfiumError> for FlattenError {
